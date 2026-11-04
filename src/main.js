@@ -43,6 +43,9 @@ const shrineAt={x:2,z:-12.5};
 const STORAGE='emilys-adventures-chapter1-v1';
 let saved=null;try{saved=JSON.parse(localStorage.getItem(STORAGE)||'null')}catch(_){saved=null}
 const state={started:false,paused:false,inDialogue:false,bagOpen:false,stage:Math.max(0,Math.min(3,saved?.stage||0)),hp:Math.max(1,Math.min(100,saved?.hp??100)),coins:saved?.coins||0,potions:Math.max(0,saved?.potions??2),collected:[0,1,2].map(i=>!!saved?.collected?.[i]),kills:saved?.kills||0,attackCD:0,hitCD:0,x:saved?.x??playerStart.x,z:saved?.z??playerStart.z};
+// Regeneration is a gameplay timer, not saved: loading a save never grants offline healing.
+const REGEN_DELAY=5,REGEN_INTERVAL=.75,REGEN_DANGER_RADIUS=4.5;
+let secondsSinceHit=0,regenAccumulator=0,regenVisible=false;
 function persist(){try{localStorage.setItem(STORAGE,JSON.stringify({stage:state.stage,hp:state.hp,coins:state.coins,potions:state.potions,collected:state.collected,kills:state.kills,x:Math.round(state.x*100)/100,z:Math.round(state.z*100)/100}))}catch(_){}}
 let notificationTimer=0;
 function toast(message){const t=$('toast');t.textContent=message;t.classList.add('show');clearTimeout(notificationTimer);notificationTimer=setTimeout(()=>t.classList.remove('show'),2800)}
@@ -50,9 +53,66 @@ const countGems=()=>state.collected.filter(Boolean).length;
 function refreshHUD(){ $('hpValue').textContent=`${Math.ceil(state.hp)} / 100`;$('hpBar').style.width=`${state.hp}%`;$('coinValue').textContent=state.coins;$('gemValue').textContent=`${countGems()} / 3`;$('potionValue').textContent=state.potions;
  const stages=[['Поговори з Мірою','Біля маленького села на тебе чекає мудра хранителька лісу.','ЗНАЙТИ ХРАНИТЕЛЬКУ'],['Знайди зоряні кристали','Відшукай три кристали у віддалених куточках лісу. Бережися тіньових духів!','КРИСТАЛИ · '+countGems()+'/3'],['Поверни світло','Усі три кристали знайдено! Віднеси їх до зоряного вівтаря на півдні.','ДО ЗОРЯНОГО ВІВТАРЯ'],['Зоряний ліс врятовано!','Ти повернула магію лісу. Можна ще досліджувати цей дивовижний світ.','РОЗДІЛ ЗАВЕРШЕНО']];
  const q=stages[state.stage];$('questTitle').textContent=q[0];$('questDesc').textContent=q[1];$('questProgress').textContent=q[2];[...$('questDots').children].forEach((el,i)=>el.classList.toggle('on',state.collected[i]));
- $('inventoryContents').innerHTML=`💎 Зоряні кристали: <b>${countGems()}/3</b><br>🪙 Монети: <b>${state.coins}</b><br>🧪 Зілля: <b>${state.potions}</b><br>⚔️ Переможені духи: <b>${state.kills}</b><br><br><span style="color:#a9ddc8">Натисни Q, щоб випити зілля і відновити 40 здоров'я.</span>`;
+ $('inventoryContents').textContent=`💎 ${countGems()}/3 кристалів · 🪙 ${state.coins} монет · ⚔️ ${state.kills} перемог`;
 }
 refreshHUD();
+
+// Inventory is derived from the existing save schema, so old saves and quest items remain compatible.
+// Future loot can occupy any of the unused slots without changing the UI.
+const INVENTORY_SIZE=20;
+const itemDescriptions={
+ potion:{name:'Зілля здоров’я',category:'ВИТРАТНИЙ ПРЕДМЕТ',icon:'🧪',description:'Миттєво відновлює 40 HP. Корисне в бою, коли повільне природне відновлення недоступне.'},
+ coin:{name:'Золоті монети',category:'ВАЛЮТА',icon:'🪙',description:'Нагорода за перемогу над тіньовими духами. Поки що їх можна збирати для майбутніх пригод.'},
+ gem0:{name:'Кристал світанку',category:'КВЕСТОВИЙ ПРЕДМЕТ',icon:'🌅',description:'Зоряний кристал ранкового світла. Потрібен для відновлення зоряного вівтаря.'},
+ gem1:{name:'Кристал сутінків',category:'КВЕСТОВИЙ ПРЕДМЕТ',icon:'🌌',description:'Кристал вечірнього неба. Збережи його для завершення головного завдання.'},
+ gem2:{name:'Кристал надії',category:'КВЕСТОВИЙ ПРЕДМЕТ',icon:'💠',description:'Магічний кристал надії. Разом з іншими повертає світло лісу.'}
+};
+let selectedInventorySlot=0;
+function inventorySlots(){
+ const slots=Array(INVENTORY_SIZE).fill(null);
+ if(state.potions>0)slots[0]={id:'potion',amount:state.potions};
+ state.collected.forEach((found,i)=>{if(found)slots[1+i]={id:'gem'+i,amount:1}});
+ if(state.coins>0)slots[4]={id:'coin',amount:state.coins};
+ return slots;
+}
+function inventorySelection(){return inventorySlots()[selectedInventorySlot]||null}
+function updateInventoryDetails(){
+ const item=inventorySelection(),data=item&&itemDescriptions[item.id];
+ $('inventoryItemArt').textContent=data?.icon||'✧';
+ $('inventoryItemType').textContent=data?.category||'ПОРОЖНЯ КОМІРКА';
+ $('inventoryItemName').textContent=data?.name||'Вільне місце';
+ $('inventoryItemDescription').textContent=data?.description||'Тут згодом з’явиться новий предмет із пригод Емілі.';
+ const use=$('inventoryUseBtn');
+ use.hidden=item?.id!=='potion';
+ use.disabled=!item||item.id!=='potion'||state.hp>=100;
+ use.textContent=state.hp>=100?'Здоров’я повне':'Випити зілля · +40 HP';
+ for(const button of $('inventoryGrid').children){
+  const on=Number(button.dataset.slot)===selectedInventorySlot;
+  button.classList.toggle('selected',on);button.setAttribute('aria-pressed',String(on));
+ }
+}
+function renderInventory(){
+ const slots=inventorySlots();
+ const grid=$('inventoryGrid');
+ const fragment=document.createDocumentFragment();
+ for(let i=0;i<INVENTORY_SIZE;i++){
+  const item=slots[i],data=item&&itemDescriptions[item.id];
+  const button=document.createElement('button');
+  button.type='button';button.className='inventorySlot';button.dataset.slot=String(i);
+  button.setAttribute('aria-label',data?`${data.name}, ${item.amount} шт., слот ${i+1}`:`Порожня комірка ${i+1}`);
+  button.setAttribute('aria-pressed',String(i===selectedInventorySlot));
+  if(!item)button.classList.add('empty');
+  else{
+   const art=document.createElement('span');art.className='inventorySlotIcon';art.textContent=data.icon;button.appendChild(art);
+   if(item.amount>1){const amount=document.createElement('span');amount.className='inventoryAmount';amount.textContent=String(item.amount);button.appendChild(amount)}
+   const label=document.createElement('span');label.className='inventorySlotLabel';label.textContent=data.name;button.appendChild(label);
+  }
+  button.addEventListener('click',()=>{selectedInventorySlot=i;updateInventoryDetails()});
+  fragment.appendChild(button);
+ }
+ grid.replaceChildren(fragment);
+ updateInventoryDetails();
+}
 
 // Rendering and camera
 const renderer=new THREE.WebGLRenderer({canvas,antialias:false,alpha:false,powerPreference:'high-performance'});
@@ -219,7 +279,7 @@ function updateMagicWaves(dt){
  }
 }
 function collect(i){if(state.collected[i]||state.stage===0)return;state.collected[i]=true;collectibles[i].group.visible=false;collectibles[i].label.visible=false;pulse(crystalsAt[i].x,crystalsAt[i].z,0xeaffd2);toast('💎 Знайдено: '+crystalsAt[i].name+'!');if(countGems()===3){state.stage=2;toast('✨ Усі кристали зібрано! Прямуй до вівтаря на півдні.')}refreshHUD();persist()}
-function heal(){if(!state.started||state.paused||state.inDialogue||state.bagOpen||settingsOpen)return;if(state.potions<=0){toast('🧪 Зілля закінчилися');return}if(state.hp>=100){toast('❤️ Здоров’я вже повне');return}state.potions--;state.hp=Math.min(100,state.hp+40);pulse(state.x,state.z,0x83eec2);toast('❤️ Відновлено 40 здоров’я');refreshHUD();persist()}
+function heal(fromInventory=false){if(!state.started||state.paused||state.inDialogue||(!fromInventory&&state.bagOpen)||settingsOpen)return;if(state.potions<=0){toast('🧪 Зілля закінчилися');return}if(state.hp>=100){toast('❤️ Здоров’я вже повне');return}state.potions--;state.hp=Math.min(100,state.hp+40);pulse(state.x,state.z,0x83eec2);toast('❤️ Відновлено здоров’я');refreshHUD();persist();if(state.bagOpen)renderInventory()}
 function attack(mode='manual'){
  if(!state.started||state.paused||state.inDialogue||state.bagOpen||settingsOpen||state.attackCD>0)return;
  const automatic=mode==='auto';
@@ -246,8 +306,8 @@ function interact(){if(!state.started||state.paused||state.inDialogue||state.bag
   else toast('✧ Вівтар чекає, доки знайдеш усі три кристали')
  }
 }
-function bag(){if(!state.started||state.inDialogue||state.paused||settingsOpen)return;state.bagOpen=true;refreshHUD();$('inventoryOverlay').classList.remove('hidden')}
-function closeBag(){$('inventoryOverlay').classList.add('hidden');state.bagOpen=false}
+function bag(){if(!state.started||state.inDialogue||state.paused||settingsOpen)return;state.bagOpen=true;refreshHUD();renderInventory();$('inventoryOverlay').classList.remove('hidden');const slot=$('inventoryGrid').children[selectedInventorySlot];if(gamepadConnected&&slot)focusGamepadElement(slot)}
+function closeBag(){$('inventoryOverlay').classList.add('hidden');state.bagOpen=false;gamepadFocus?.classList.remove('gamepad-focus');gamepadFocus=null}
 function setPause(force){if(!state.started||state.inDialogue||state.bagOpen||settingsOpen)return;state.paused=typeof force==='boolean'?force:!state.paused;$('pauseOverlay').classList.toggle('hidden',!state.paused);persist()}
 // Graphics settings can be changed live; gameplay progress is stored separately.
 let settingsOpen=false,settingsReturnFocus=null;
@@ -342,7 +402,7 @@ $('mapToggle').onclick=()=>toggleMobilePanel('map');
 function collapsePanels(){document.body.classList.remove('show-quest','show-map');$('questToggle').setAttribute('aria-expanded','false');$('mapToggle').setAttribute('aria-expanded','false')}
 function reset(){try{localStorage.removeItem(STORAGE)}catch(_){ }window.location.reload()}
 $('startBtn').textContent=saved?'Продовжити пригоду ✨':'Розпочати пригоду ✨';$('startBtn').addEventListener('click',()=>{state.started=true;$('startOverlay').classList.add('hidden');toast(state.stage===0?'🌿 Знайди Міру біля села':'✨ З поверненням у Зоряний ліс!')});
-$('interactBtn').onclick=interact;$('attackBtn').onclick=attack;$('healBtn').onclick=heal;$('inventoryBtn').onclick=bag;
+$('interactBtn').onclick=interact;$('attackBtn').onclick=attack;$('healBtn').onclick=()=>heal();$('inventoryBtn').onclick=bag;
 // React on touch-down instead of waiting for click: reliable while a second finger holds the stick.
 const mobileActionBindings=[['mInteract',interact],['mAttack',attack],['mHeal',heal],['mBag',bag]];
 for(const [id,action] of mobileActionBindings){
@@ -357,11 +417,11 @@ for(const [id,action] of mobileActionBindings){
   action();
  });
 }
-$('pauseBtn').onclick=()=>setPause();$('resumeBtn').onclick=()=>setPause(false);$('restartBtn').onclick=reset;$('closeBagBtn').onclick=closeBag;$('winRestart').onclick=reset;
+$('pauseBtn').onclick=()=>setPause();$('resumeBtn').onclick=()=>setPause(false);$('restartBtn').onclick=reset;$('closeBagBtn').onclick=closeBag;$('closeBagTopBtn').onclick=closeBag;$('inventoryUseBtn').onclick=()=>heal(true);$('winRestart').onclick=reset;
 $('winContinue').onclick=()=>{$('winOverlay').classList.add('hidden');state.paused=false};
 // Mobile controls v1.4: live layouts, analog joystick and independent multitouch actions.
 const CONTROL_STORAGE='emilys-adventures-controls-v1';
-const GAME_VERSION='1.6.0';
+const GAME_VERSION='1.7.0';
 document.documentElement.dataset.gameVersion=GAME_VERSION;
 const CONTROL_MODES=['auto','center','split','floating'];
 let gamepadConnected=false;
@@ -471,6 +531,7 @@ function refreshGamepadFocus(){
  if(items.length&&!items.includes(gamepadFocus)){
   const preferred=panel.id==='settingsOverlay'?$('controlLayout'):
     panel.id==='pauseOverlay'?$('resumeBtn'):
+    panel.id==='inventoryOverlay'?$('inventoryGrid').children[selectedInventorySlot]:
     panel.id==='game'?$('settingsBtn'):items[0];
   focusGamepadElement(items.includes(preferred)?preferred:items[0]);
  }
@@ -493,6 +554,22 @@ function changeGamepadValue(el,direction){
 }
 function navigateGamepadUI(direction){
  const items=refreshGamepadFocus();if(!items.length)return;
+ if(state.bagOpen&&gamepadFocus?.classList.contains('inventorySlot')){
+  const slot=Number(gamepadFocus.dataset.slot);
+  const cols=getComputedStyle($('inventoryGrid')).gridTemplateColumns.split(' ').length||5;
+  const col=slot%cols;
+  let next=slot;
+  if(direction==='left'&&col>0)next--;
+  else if(direction==='right'&&col<cols-1&&next<INVENTORY_SIZE-1)next++;
+  else if(direction==='up'&&slot>=cols)next-=cols;
+  else if(direction==='down'&&slot+cols<INVENTORY_SIZE)next+=cols;
+  else if(direction==='down'&&slot+cols>=INVENTORY_SIZE&&visibleElement($('inventoryUseBtn'))&&!$('inventoryUseBtn').disabled){focusGamepadElement($('inventoryUseBtn'));return}
+  if(next!==slot){selectedInventorySlot=next;updateInventoryDetails();focusGamepadElement($('inventoryGrid').children[next])}
+  return;
+ }
+ if(state.bagOpen&&gamepadFocus===$('inventoryUseBtn')&&direction==='up'){
+  focusGamepadElement($('inventoryGrid').children[selectedInventorySlot]);return;
+ }
  if((direction==='left'||direction==='right')&&changeGamepadValue(gamepadFocus,direction==='right'?1:-1))return;
  const index=items.indexOf(gamepadFocus),step=(direction==='up'||direction==='left')?-1:1;
  focusGamepadElement(items[Math.max(0,Math.min(items.length-1,index+step))]);
@@ -547,6 +624,7 @@ function readGamepad(){
  if(currentPanel!==gamepadLastPanel){gamepadLastPanel=currentPanel;refreshGamepadFocus();}
  if(currentPanel){
   if(just(1)){closeGamepadUI();refreshGamepadFocus();}
+  else if(state.bagOpen&&just(2))heal(true);
   else if(just(0))activateGamepadUI();
   const axes=gp.axes||[],x=axes[0]||0,y=axes[1]||0;
   const dx=gamepadPressed(gp,15)?1:gamepadPressed(gp,14)?-1:Math.abs(x)>.52?Math.sign(x):0;
@@ -631,6 +709,12 @@ for(const evt of ['pointerup','pointercancel','lostpointercapture'])actionDock.a
 window.addEventListener('keydown',e=>{
  if(editControlsMode){if(e.code==='Escape'){e.preventDefault();finishControlsEdit()}return}
  if(settingsOpen){if(e.code==='Escape'){e.preventDefault();closeSettings()}return}
+ if(state.bagOpen&&['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)){
+  e.preventDefault();const direction=e.code.slice(5).toLowerCase();
+  const slot=$('inventoryGrid').children[selectedInventorySlot];
+  if(slot)focusGamepadElement(slot);
+  navigateGamepadUI(direction);return;
+ }
  if(arrowKeys.has(e.code))e.preventDefault();pressed.add(e.code);
  if(e.repeat)return;
  if(e.code==='Escape'){if(state.bagOpen)closeBag();else if(state.inDialogue)$('nextDialogue').click();else setPause();}
@@ -662,8 +746,21 @@ function update(dt){const gamepad=readGamepad();if(!state.started||state.paused|
  for(let i=0;i<collectibles.length;i++){const c=collectibles[i];if(!state.collected[i]){c.c.rotation.y+=dt*.9;c.c.position.y=1.03+Math.sin(time*2.5+i)*.12;c.ring.rotation.z+=dt*.25;if(state.stage>=1&&Math.hypot(state.x-c.x,state.z-c.z)<.9)collect(i)}}
  for(let e of enemies){if(!e.alive)continue;const d=Math.hypot(e.x-state.x,e.z-state.z);e.attackTimer=Math.max(0,e.attackTimer-dt);e.group.position.y=Math.sin(time*2.2+e.phase)*.095;e.group.rotation.y+=dt*.5;
  if(d<4.5&&d>1.1){const vx=(state.x-e.x)/d,vz=(state.z-e.z)/d;e.x+=vx*dt*.97;e.z+=vz*dt*.97;e.group.position.x=e.x;e.group.position.z=e.z;e.shadow.position.x=e.x;e.shadow.position.z=e.z}
- if(d<1.26&&e.attackTimer===0&&state.hitCD===0){state.hp=Math.max(0,state.hp-9);state.hitCD=.75;e.attackTimer=1.25;pulse(state.x,state.z,0xff8298);refreshHUD();if(state.hp<=0){state.hp=100;state.x=playerStart.x;state.z=playerStart.z;state.coins=Math.max(0,state.coins-5);walkTo=null;toast('💗 Міра повернула Емілі до села. Тримайся!');refreshHUD()}else toast('💔 Дух атакував! -9 здоров’я');persist()}
+ if(d<1.26&&e.attackTimer===0&&state.hitCD===0){state.hp=Math.max(0,state.hp-9);secondsSinceHit=0;regenAccumulator=0;state.hitCD=.75;e.attackTimer=1.25;pulse(state.x,state.z,0xff8298);refreshHUD();if(state.hp<=0){state.hp=100;state.x=playerStart.x;state.z=playerStart.z;state.coins=Math.max(0,state.coins-5);walkTo=null;toast('💗 Міра повернула Емілі до села. Тримайся!');refreshHUD()}else toast('💔 Дух атакував! -9 здоров’я');persist()}
  }
+ // Regen only while exploring safely; the update loop halts during all overlays and dialogues.
+ secondsSinceHit+=dt;
+ const danger=enemies.some(e=>e.alive&&Math.hypot(e.x-state.x,e.z-state.z)<REGEN_DANGER_RADIUS);
+ const regenerating=state.hp<100&&secondsSinceHit>=REGEN_DELAY&&!danger;
+ if(regenerating){
+  regenAccumulator+=dt;
+  if(regenAccumulator>=REGEN_INTERVAL){
+   const points=Math.floor(regenAccumulator/REGEN_INTERVAL);
+   regenAccumulator%=REGEN_INTERVAL;
+   state.hp=Math.min(100,state.hp+points);refreshHUD();
+  }
+ }else regenAccumulator=0;
+ if(regenVisible!==regenerating){regenVisible=regenerating;$('regenBadge').hidden=!regenerating}
  const nearest=nearObject();$('nearPrompt').classList.toggle('show',!!nearest);if(nearest)$('nearText').textContent=nearest.label;
  saveClock+=dt;if(saveClock>8){saveClock=0;persist()}
 }
