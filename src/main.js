@@ -250,7 +250,7 @@ function bag(){if(!state.started||state.inDialogue||state.paused||settingsOpen)r
 function closeBag(){$('inventoryOverlay').classList.add('hidden');state.bagOpen=false}
 function setPause(force){if(!state.started||state.inDialogue||state.bagOpen||settingsOpen)return;state.paused=typeof force==='boolean'?force:!state.paused;$('pauseOverlay').classList.toggle('hidden',!state.paused);persist()}
 // Graphics settings can be changed live; gameplay progress is stored separately.
-let settingsOpen=false;
+let settingsOpen=false,settingsReturnFocus=null;
 const controls={preset:$('qualityPreset'),scale:$('renderScale'),shadows:$('shadowQuality'),fps:$('frameLimit'),decorations:$('decorationQuality'),effects:$('reduceEffects'),meter:$('showFps'),autoAttack:$('autoAttack')};
 function applyGraphics(){
  renderer.shadowMap.enabled=graphics.shadows!=='off';
@@ -294,11 +294,35 @@ controls.meter.addEventListener('change',()=>setGraphics({showFps:controls.meter
 controls.autoAttack.addEventListener('change',()=>setGraphics({autoAttack:controls.autoAttack.checked}));
 function openSettings(){
  if(settingsOpen||state.inDialogue)return;
+ settingsReturnFocus=document.activeElement;
  settingsOpen=true;
  $('settingsOverlay').classList.remove('hidden');syncSettings();
- $('closeSettingsBtn').focus();
+ $('controlLayout').focus({preventScroll:true});
 }
-function closeSettings(){settingsOpen=false;$('settingsOverlay').classList.add('hidden');$('settingsBtn').focus()}
+function closeSettings(){settingsOpen=false;$('settingsOverlay').classList.add('hidden');(settingsReturnFocus?.isConnected?settingsReturnFocus:$('settingsBtn')).focus({preventScroll:true})}
+const fullscreenButton=$('fullscreenBtn');
+function refreshFullscreenButton(){
+ const active=document.fullscreenElement===$('game')||document.webkitFullscreenElement===$('game');
+ fullscreenButton.textContent=active?'⤡':'⛶';
+ fullscreenButton.title=active?'Вийти з повного екрана':'На весь екран';
+ fullscreenButton.setAttribute('aria-label',fullscreenButton.title);
+ fullscreenButton.setAttribute('aria-pressed',String(active));
+ resize();
+}
+async function toggleFullscreen(){
+ const game=$('game');
+ try{
+  if(document.fullscreenElement||document.webkitFullscreenElement){
+   if(document.exitFullscreen)await document.exitFullscreen();
+   else if(document.webkitExitFullscreen)await document.webkitExitFullscreen();
+  }else if(game.requestFullscreen){await game.requestFullscreen();}
+  else if(game.webkitRequestFullscreen){await game.webkitRequestFullscreen();}
+  else toast('📱 Цей браузер не дозволяє переходити у повний екран зі сторінки');
+ }catch(error){console.info('[Emily] Fullscreen unavailable:',error);toast('📱 Не вдалося відкрити повний екран. Спробуй режим застосунку в Chrome.');}
+ refreshFullscreenButton();
+}
+fullscreenButton.addEventListener('click',toggleFullscreen);
+for(const evt of ['fullscreenchange','webkitfullscreenchange'])document.addEventListener(evt,refreshFullscreenButton);
 $('settingsBtn').addEventListener('click',openSettings);
 $('pauseSettingsBtn').addEventListener('click',openSettings);
 $('closeSettingsBtn').addEventListener('click',closeSettings);
@@ -337,9 +361,10 @@ $('pauseBtn').onclick=()=>setPause();$('resumeBtn').onclick=()=>setPause(false);
 $('winContinue').onclick=()=>{$('winOverlay').classList.add('hidden');state.paused=false};
 // Mobile controls v1.4: live layouts, analog joystick and independent multitouch actions.
 const CONTROL_STORAGE='emilys-adventures-controls-v1';
-const GAME_VERSION='1.5.1';
+const GAME_VERSION='1.6.0';
 document.documentElement.dataset.gameVersion=GAME_VERSION;
 const CONTROL_MODES=['auto','center','split','floating'];
+let gamepadConnected=false;
 let controlPrefs={mode:'auto',dock:null};
 try{
  const previous=JSON.parse(localStorage.getItem(CONTROL_STORAGE)||'{}');
@@ -353,7 +378,7 @@ const pressed=new Set();const arrowKeys=new Set(['ArrowUp','ArrowDown','ArrowLef
 const joystick={active:false,pointerId:null,x:0,y:0,maxRadius:42};
 let editControlsMode=false;
 const joystickEl=$('mobileJoystick'),joystickKnob=$('joyKnob'),floatZone=$('floatingTouchZone'),actionDock=$('mobileActions');
-function effectiveLayout(){return controlPrefs.mode==='auto'?(innerHeight>=innerWidth?'center':'split'):controlPrefs.mode}
+function effectiveLayout(){return gamepadConnected?'gamepad':(controlPrefs.mode==='auto'?(innerHeight>=innerWidth?'center':'split'):controlPrefs.mode)}
 function setJoystick(x,y){
  joystick.x=x;joystick.y=y;
  const tx=Math.round(x*joystick.maxRadius),ty=Math.round(y*joystick.maxRadius);
@@ -389,8 +414,8 @@ function applyControlLayout(){
  }
  document.body.dataset.controlLayout=layout;
  $('controlLayout').value=controlPrefs.mode;
- const layoutTitles={center:'🎯 Центр + дуга',split:'👐 Два великі пальці',floating:'🕹️ Вільний джойстик'};
- $('controlLayoutHint').textContent=`Зараз: ${layoutTitles[layout]}. ${controlPrefs.mode==='auto'?'Автоматичний вибір за орієнтацією екрана.':'Ручний вибір збережено.'}`;
+ const layoutTitles={center:'🎯 Центр + дуга',split:'👐 Два великі пальці',floating:'🕹️ Вільний джойстик',gamepad:'🎮 Автоматичний геймпад'};
+ $('controlLayoutHint').textContent=`Зараз: ${layoutTitles[layout]}. ${gamepadConnected?'Сенсорний джойстик сховано, ромб приглушено.':controlPrefs.mode==='auto'?'Автоматичний вибір за орієнтацією екрана.':'Ручний вибір збережено.'}`;
  $('editControlsRow').hidden=layout!=='floating';
  if(editControlsMode&&layout!=='floating')finishControlsEdit();
  applyDock();
@@ -406,29 +431,148 @@ $('controlLayout').addEventListener('input',onControlLayoutChange);
 // Rotating a phone changes auto mode immediately. Explicit choices remain unchanged.
 window.addEventListener('resize',applyControlLayout);
 window.visualViewport?.addEventListener('resize',applyControlLayout);
+// Unified gamepad navigation: gameplay, all overlays, settings fields and HUD.
 const gamepadButtons=new Map();
-function readGamepad(){
- const pads=navigator.getGamepads?.()||[];
- const gp=[...pads].find(p=>p&&p.connected&&p.mapping==='standard')||[...pads].find(p=>p&&p.connected)||null;
- const result={active:!!gp,x:0,y:0,analog:false};
- if(!gp){gamepadButtons.clear();return result}
- let x=gp.axes?.[0]||0,y=gp.axes?.[1]||0;
- if(Math.abs(x)<.16)x=0; if(Math.abs(y)<.16)y=0;
- if(x||y){result.x=x;result.y=y;result.analog=true}
- else{
-  result.x=(gp.buttons?.[15]?.pressed?1:0)-(gp.buttons?.[14]?.pressed?1:0);
-  result.y=(gp.buttons?.[13]?.pressed?1:0)-(gp.buttons?.[12]?.pressed?1:0);
- }
- const bindings=[[0,interact],[2,attack],[1,heal],[3,()=>{if(state.bagOpen)closeBag();else bag()}],[8,()=>{if(state.bagOpen)closeBag();else bag()}],[9,()=>setPause()]];
- for(const [index,action] of bindings){
-  const down=!!gp.buttons?.[index]?.pressed, prev=gamepadButtons.get(index)===true;
-  if(down&&!prev)action();
-  gamepadButtons.set(index,down);
- }
- return result;
+let gamepadMenuMode=false,gamepadFocus=null,gamepadDirection='',gamepadNextRepeat=0,gamepadLastPanel=null;
+let gamepadDeviceId='';
+const focusableSelector='button:not([disabled]), select:not([disabled]), input:not([disabled]):not([type="hidden"])';
+function visibleElement(element){
+ if(!element||!element.isConnected||element.closest('[hidden],.hidden'))return false;
+ return element.getClientRects().length>0&&getComputedStyle(element).visibility!=='hidden';
 }
-window.addEventListener('gamepadconnected',()=>toast('🎮 Геймпад підключено'));
-window.addEventListener('gamepaddisconnected',()=>{gamepadButtons.clear();toast('🎮 Геймпад відключено')});
+function activeGamepadPanel(){
+ if(settingsOpen)return $('settingsOverlay');
+ if(state.inDialogue)return $('dialogue');
+ if(visibleElement($('winOverlay')))return $('winOverlay');
+ if(state.bagOpen)return $('inventoryOverlay');
+ if(state.paused)return $('pauseOverlay');
+ if(!state.started)return $('startOverlay');
+ if(editControlsMode)return $('editControlsBanner');
+ if(gamepadMenuMode)return $('game');
+ return null;
+}
+function focusableGamepadItems(panel){
+ const list=panel?.id==='game'?document.querySelectorAll('.topbarActions button,#bottomHUD button,.mobileTool')
+                              :panel?.querySelectorAll(focusableSelector);
+ return [...(list||[])].filter(visibleElement);
+}
+function focusGamepadElement(element){
+ if(gamepadFocus&&gamepadFocus!==element)gamepadFocus.classList.remove('gamepad-focus');
+ gamepadFocus=element||null;
+ if(!element)return;
+ element.classList.add('gamepad-focus');
+ element.focus({preventScroll:true});
+ element.scrollIntoView?.({block:'nearest',inline:'nearest',behavior:'auto'});
+}
+function refreshGamepadFocus(){
+ const panel=activeGamepadPanel();
+ if(!panel){focusGamepadElement(null);return []}
+ const items=focusableGamepadItems(panel);
+ if(items.length&&!items.includes(gamepadFocus)){
+  const preferred=panel.id==='settingsOverlay'?$('controlLayout'):
+    panel.id==='pauseOverlay'?$('resumeBtn'):
+    panel.id==='game'?$('settingsBtn'):items[0];
+  focusGamepadElement(items.includes(preferred)?preferred:items[0]);
+ }
+ return items;
+}
+function changeGamepadValue(el,direction){
+ if(el instanceof HTMLSelectElement){
+  const enabled=[...el.options].filter(x=>!x.disabled);
+  const current=enabled.findIndex(o=>o.value===el.value);
+  const next=enabled[Math.max(0,Math.min(enabled.length-1,current+direction))];
+  if(next&&el.value!==next.value){el.value=next.value;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}
+  return true;
+ }
+ if(el instanceof HTMLInputElement&&el.type==='range'){
+  if(direction>0)el.stepUp();else el.stepDown();
+  el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));
+  return true;
+ }
+ return false;
+}
+function navigateGamepadUI(direction){
+ const items=refreshGamepadFocus();if(!items.length)return;
+ if((direction==='left'||direction==='right')&&changeGamepadValue(gamepadFocus,direction==='right'?1:-1))return;
+ const index=items.indexOf(gamepadFocus),step=(direction==='up'||direction==='left')?-1:1;
+ focusGamepadElement(items[Math.max(0,Math.min(items.length-1,index+step))]);
+}
+function activateGamepadUI(){
+ const items=refreshGamepadFocus();if(!items.length)return;
+ const el=gamepadFocus;
+ if(el instanceof HTMLSelectElement||el instanceof HTMLInputElement&&el.type==='range'){
+  changeGamepadValue(el,1);
+ }else{el.click();refreshGamepadFocus();}
+}
+function closeGamepadUI(){
+ if(editControlsMode){finishControlsEdit();return}
+ if(settingsOpen){closeSettings();return}
+ if(state.inDialogue){$('nextDialogue').click();return}
+ if(state.bagOpen){closeBag();return}
+ if(state.paused){setPause(false);return}
+ if(visibleElement($('winOverlay'))){$('winContinue').click();return}
+ if(gamepadMenuMode){gamepadMenuMode=false;focusGamepadElement(null);return}
+}
+function gamepadPressed(gp,index){return !!gp.buttons?.[index]?.pressed}
+function readGamepad(){
+ const pads=Array.from(navigator.getGamepads?.()||[]).filter(Boolean);
+ const gp=pads.find(p=>p.connected&&p.mapping==='standard')||pads.find(p=>p.connected)||null;
+ const connected=!!gp;
+ if(connected!==gamepadConnected){
+  gamepadConnected=connected;
+  if(!connected){gamepadDeviceId='';gamepadButtons.clear();gamepadMenuMode=false;focusGamepadElement(null);}
+  document.body.classList.toggle('gamepad-active',connected);
+  applyControlLayout();
+  if(connected)toast('🎮 Геймпад підключено: Select відкриває меню');
+ }
+ if(!gp)return {active:false,x:0,y:0,analog:false};
+ const deviceId=`${gp.index}:${gp.id}`;
+ if(deviceId!==gamepadDeviceId){gamepadDeviceId=deviceId;gamepadButtons.clear();gamepadDirection='';gamepadNextRepeat=0}
+ const just=index=>gamepadPressed(gp,index)&&!gamepadButtons.get(index);
+ const mark=()=>{for(const i of [0,1,2,3,8,9,12,13,14,15])gamepadButtons.set(i,gamepadPressed(gp,i))};
+ const panel=activeGamepadPanel();
+ const inUI=!!panel;
+ if(just(8)&&state.started&&!state.paused&&!settingsOpen&&!state.inDialogue&&!state.bagOpen){
+  gamepadMenuMode=!gamepadMenuMode;
+  if(!gamepadMenuMode)focusGamepadElement(null);
+  else refreshGamepadFocus();
+ }
+ if(just(9)){
+  if(settingsOpen)closeSettings();
+  else if(state.paused)setPause(false);
+  else if(state.started&&!state.inDialogue&&!state.bagOpen)setPause(true);
+  else if(!state.started)$('startBtn').click();
+ }
+ const currentPanel=activeGamepadPanel();
+ if(currentPanel!==gamepadLastPanel){gamepadLastPanel=currentPanel;refreshGamepadFocus();}
+ if(currentPanel){
+  if(just(1)){closeGamepadUI();refreshGamepadFocus();}
+  else if(just(0))activateGamepadUI();
+  const axes=gp.axes||[],x=axes[0]||0,y=axes[1]||0;
+  const dx=gamepadPressed(gp,15)?1:gamepadPressed(gp,14)?-1:Math.abs(x)>.52?Math.sign(x):0;
+  const dy=gamepadPressed(gp,13)?1:gamepadPressed(gp,12)?-1:Math.abs(y)>.52?Math.sign(y):0;
+  const direction=dy?(dy>0?'down':'up'):dx?(dx>0?'right':'left'):'';
+  const now=performance.now();
+  if(direction&&(!gamepadDirection||direction!==gamepadDirection||now>=gamepadNextRepeat)){
+   navigateGamepadUI(direction);
+   gamepadNextRepeat=now+(direction!==gamepadDirection?370:155);
+  }
+  gamepadDirection=direction;
+  mark();return {active:true,x:0,y:0,analog:false};
+ }
+ gamepadDirection='';
+ if(just(0))interact();
+ if(just(1))heal();
+ if(just(2))attack();
+ if(just(3))bag();
+ let x=gp.axes?.[0]||0,y=gp.axes?.[1]||0;
+ if(Math.abs(x)<.16)x=0;if(Math.abs(y)<.16)y=0;
+ const analog=!!(x||y);
+ if(!analog){x=(gamepadPressed(gp,15)?1:0)-(gamepadPressed(gp,14)?1:0);y=(gamepadPressed(gp,13)?1:0)-(gamepadPressed(gp,12)?1:0)}
+ mark();return {active:true,x,y,analog};
+}
+window.addEventListener('gamepadconnected',()=>{gamepadNextRepeat=0});
+window.addEventListener('gamepaddisconnected',()=>{gamepadNextRepeat=0});
 function setJoystickFromPointer(e){
  const rect=joystickEl.getBoundingClientRect(),cx=rect.left+rect.width/2,cy=rect.top+rect.height/2;
  joystick.maxRadius=Math.max(26,(rect.width-joystickKnob.offsetWidth)/2-5);
@@ -494,7 +638,7 @@ window.addEventListener('keydown',e=>{
  else if(e.code==='KeyI'){if(state.bagOpen)closeBag();else bag()}
 });
 window.addEventListener('keyup',e=>pressed.delete(e.code));
-window.addEventListener('blur',()=>{pressed.clear();gamepadButtons.clear();endJoystick();last=performance.now()});
+window.addEventListener('blur',()=>{pressed.clear();gamepadDirection='';endJoystick();last=performance.now()});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)endJoystick();else last=performance.now()});
 applyControlLayout();
 // v1.5: tap-to-move removed completely to avoid accidental walks on touch devices.

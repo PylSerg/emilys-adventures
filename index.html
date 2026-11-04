@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#172b33">
 <title>Emily's Adventures | Таємниця зоряного лісу</title>
-<link rel="stylesheet" href="src/styles.css?v=1.5.1">
+<link rel="stylesheet" href="src/styles.css?v=1.6.0">
 </head>
 <body>
 <div id="game">
@@ -15,6 +15,7 @@
     <div class="topbarActions">
       <button class="iconbtn mobileTool" id="questToggle" title="Показати завдання" aria-expanded="false" aria-controls="questPanel">📜</button>
       <button class="iconbtn mobileTool" id="mapToggle" title="Показати мінімапу" aria-expanded="false" aria-controls="mapPanel">🗺️</button>
+      <button class="iconbtn" id="fullscreenBtn" type="button" title="На весь екран" aria-label="На весь екран" aria-pressed="false">⛶</button>
       <button class="iconbtn" id="settingsBtn" title="Налаштування графіки" aria-label="Налаштування графіки">⚙️</button>
       <button class="iconbtn" id="pauseBtn" title="Пауза">☰</button>
     </div>
@@ -45,7 +46,7 @@
   <div class="overlay" id="startOverlay"><div class="intro"><div class="introCopy"><div class="tag">✧ Казкова RPG-пригода</div><h1>Emily's<br><em>Adventures</em></h1><p>Десь серед шепоту старих дерев згасають три зоряні кристали. Маленька Емілі вирушає в ліс, де на неї чекають дивовижні зустрічі, таємниці й хоробрість.</p><button class="primary" id="startBtn">Розпочати пригоду ✨</button><div class="footnote">THREE.JS · ЗРОБЛЕНО З ЛЮБОВ'Ю ДО ПРИГОД</div></div><div class="introPic"><div class="moon"></div><img id="introPortrait" alt="Піксельна Емілі" src="assets/hero/emily-portrait.png"></div></div></div>
   <div class="overlay hidden" id="settingsOverlay" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
     <div class="settingsModal">
-      <div class="settingsHeader"><div><span class="settingsKicker">⚙️ ПАРАМЕТРИ ГРИ <span class="gameVersion" aria-label="Версія гри">v1.5.1</span></span><h2 id="settingsTitle">Налаштування графіки</h2><p>Підбери комфортну плавність для свого пристрою. Зміни застосовуються одразу.</p></div><button class="settingsClose" id="closeSettingsBtn" aria-label="Закрити налаштування">✕</button></div>
+      <div class="settingsHeader"><div><span class="settingsKicker">⚙️ ПАРАМЕТРИ ГРИ <span class="gameVersion" aria-label="Версія гри">v1.6.0</span></span><h2 id="settingsTitle">Налаштування графіки</h2><p>Підбери комфортну плавність для свого пристрою. Зміни застосовуються одразу.</p></div><button class="settingsClose" id="closeSettingsBtn" aria-label="Закрити налаштування">✕</button></div>
       <div class="settingsBody">
         <div class="settingRow"><label for="controlLayout">Мобільне керування <small id="controlLayoutHint" aria-live="polite">Автоматично: центр вертикально, два пальці горизонтально</small></label><select id="controlLayout"><option value="auto">📱 Автоматично</option><option value="center">🎯 Центр + дуга</option><option value="split">👐 Два великі пальці</option><option value="floating">🕹️ Вільний джойстик</option></select></div>
         <div class="settingRow" id="editControlsRow" hidden><label>Вільне розташування <small>Джойстик з’являється під пальцем, блок дій можна пересунути</small></label><div class="controlEditActions"><button type="button" class="secondary" id="editControlsBtn">↔ Пересунути</button><button type="button" class="secondary" id="resetControlsBtn">↺ Скинути</button></div></div>
@@ -57,7 +58,7 @@
         <label class="settingCheck"><input id="reduceEffects" type="checkbox"><span>Спростити ефекти інтерфейсу <small>Без розмиття напівпрозорих панелей</small></span></label>
         <label class="settingCheck"><input id="showFps" type="checkbox"><span>Показувати FPS <small>Орієнтовна частота промальовування сцени</small></span></label>
         <label class="settingCheck"><input id="autoAttack" type="checkbox"><span>Автоатака <small>Хвиля радіусом 2,35 м. Зблизька сильніша, на краю звичайна</small></span></label>
-        <div class="settingNote">🎮 Підтримка геймпада: лівий стик або D-pad — рух, A — дія, X — удар, B — зілля, Y — рюкзак, Start — пауза.</div>
+        <div class="settingNote">🎮 Геймпад: лівий стик / D-pad — рух; A — дія; B — зілля; X — удар; Y — рюкзак; Start — пауза; Select / View — керування меню. У меню: стік або D-pad — вибір, A — підтвердити, B — назад.</div>
       </div>
       <div class="settingsFooter"><span>💾 Зберігається окремо від проходження гри</span><button class="primary" id="applySettingsBtn">Готово ✓</button></div>
     </div>
@@ -67,7 +68,7 @@
   <div class="overlay hidden" id="winOverlay"><div class="smallModal"><div style="font-size:46px">🌟</div><h2>Ліс знову сяє!</h2><p>Емілі повернула зоряне світло до стародавнього вівтаря. Це кінець першого розділу, але початок великої історії. Дякуємо за пригоду!</p><div class="actions"><button class="primary" id="winContinue">Ще погуляти 🌿</button><button class="secondary" id="winRestart">Нова пригода</button></div></div></div>
   <div id="fatal">Не вдалося завантажити Three.js. Для запуску гри потрібен інтернет, оскільки 3D-рушій завантажується з CDN. Перевір з'єднання та перезавантаж сторінку.</div>
 </div>
-<script src="src/main.js?v=1.5.1" defer></script>
+<script src="src/main.js?v=1.6.0" defer></script>
 
 </body>
 </html>

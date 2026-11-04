@@ -288,3 +288,69 @@ body[data-control-layout="floating"] .mobileActions:not(.custom-dock){right:max(
  body[data-control-layout="floating"] #fpsCounter{bottom:calc(154px + env(safe-area-inset-bottom))}
  .side .quest,.side .mapwrap{top:calc(58px + env(safe-area-inset-top));left:auto;right:8px}
 }
+
+/* v1.6 · controller-first interface */
+#fullscreenBtn{font-size:25px;line-height:1}
+#game:fullscreen{width:100%;height:100%;min-height:100dvh}
+#game:-webkit-full-screen{width:100%;height:100%}
+/* Native ABXY ordering: Y (backpack) top, X (attack) left,
+   B (potion) right, A (interaction) bottom. */
+body[data-control-layout="split"] .mobileActions,
+body[data-control-layout="gamepad"] .mobileActions{left:auto;right:max(4px,env(safe-area-inset-right));bottom:calc(16px + env(safe-area-inset-bottom));transform:none;width:174px;height:174px}
+body[data-control-layout="split"] .mobileActionBtn,
+body[data-control-layout="gamepad"] .mobileActionBtn{position:absolute}
+body[data-control-layout="split"] .action-bag,
+body[data-control-layout="gamepad"] .action-bag{top:0;left:56px;right:auto;bottom:auto}
+body[data-control-layout="split"] .action-attack,
+body[data-control-layout="gamepad"] .action-attack{top:54px;left:0;right:auto;bottom:auto}
+body[data-control-layout="split"] .action-heal,
+body[data-control-layout="gamepad"] .action-heal{top:54px;right:0;left:auto;bottom:auto}
+body[data-control-layout="split"] .action-interact,
+body[data-control-layout="gamepad"] .action-interact{bottom:0;left:56px;top:auto;right:auto}
+/* Controller is detected automatically; preserve chosen touch layout for reconnect. */
+body[data-control-layout="gamepad"] .mobileJoystick,
+body[data-control-layout="gamepad"] .floatingTouchZone{display:none!important}
+body[data-control-layout="gamepad"] .mobileActions{opacity:.43;transition:opacity .2s ease}
+body[data-control-layout="gamepad"] .mobileActions:active{opacity:.9}
+body[data-control-layout="gamepad"] #fpsCounter{bottom:calc(202px + env(safe-area-inset-bottom))}
+/* Visible focus for gamepad navigation in overlays, menus and the HUD. */
+.gamepad-focus{outline:3px solid #ffe5a6!important;outline-offset:3px;box-shadow:0 0 0 6px rgba(15,59,64,.5),0 0 22px rgba(255,214,124,.55)!important}
+.settingsBody .gamepad-focus{scroll-margin-block:60px}
+/* Interaction prompt is placed at the top in landscape; avoid crossing the game world. */
+@media(max-width:900px) and (orientation:landscape),
+       (max-height:580px) and (orientation:landscape){
+ #nearPrompt{top:calc(67px + env(safe-area-inset-top));bottom:auto!important;left:50%;transform:translateX(-50%);max-width:min(52vw,400px);z-index:6}
+ #toast{top:calc(8px + env(safe-area-inset-top));max-width:min(48vw,370px)}
+}
+@media(max-width:400px){
+ .topbarActions{gap:3px}
+ .iconbtn{width:34px;min-width:34px;height:34px;font-size:16px}
+ #fullscreenBtn{font-size:21px}
+ .stats{width:145px}
+ body[data-control-layout="split"] .mobileActions,
+ body[data-control-layout="gamepad"] .mobileActions{width:150px;height:150px;right:max(3px,env(safe-area-inset-right))}
+ body[data-control-layout="split"] .mobileActionBtn,
+ body[data-control-layout="gamepad"] .mobileActionBtn{width:54px;height:54px;font-size:22px}
+ body[data-control-layout="split"] .action-bag,
+ body[data-control-layout="gamepad"] .action-bag{left:48px;top:0;right:auto;bottom:auto}
+ body[data-control-layout="split"] .action-attack,
+ body[data-control-layout="gamepad"] .action-attack{left:0;top:45px;right:auto;bottom:auto;width:59px;height:59px}
+ body[data-control-layout="split"] .action-heal,
+ body[data-control-layout="gamepad"] .action-heal{right:0;top:48px;left:auto;bottom:auto}
+ body[data-control-layout="split"] .action-interact,
+ body[data-control-layout="gamepad"] .action-interact{left:48px;bottom:0;right:auto;top:auto}
+ body[data-control-layout="gamepad"] #fpsCounter{bottom:calc(179px + env(safe-area-inset-bottom))}
+}
+@media(max-height:530px) and (orientation:landscape){
+ body[data-control-layout="gamepad"] .mobileActions{scale:.86;transform-origin:bottom right;bottom:calc(7px + env(safe-area-inset-bottom))}
+ body[data-control-layout="gamepad"] #fpsCounter{bottom:calc(166px + env(safe-area-inset-bottom))}
+}
+@media(max-width:350px){
+ .topbar{right:6px}
+ .topbarActions{gap:1px}
+ .topbar .iconbtn{width:30px;min-width:30px;height:30px;font-size:14px;border-radius:10px}
+ .topbar #fullscreenBtn{font-size:18px}
+ .stats{left:6px;width:132px;padding:7px 8px}
+ .statpills{gap:3px}
+ .statpill{padding:3px 4px;font-size:8px}
+}
