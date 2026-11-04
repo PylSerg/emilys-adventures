@@ -257,13 +257,153 @@ function collapsePanels(){document.body.classList.remove('show-quest','show-map'
 function reset(){try{localStorage.removeItem(STORAGE)}catch(_){ }window.location.reload()}
 $('startBtn').textContent=saved?'Продовжити пригоду ✨':'Розпочати пригоду ✨';$('startBtn').addEventListener('click',()=>{state.started=true;$('startOverlay').classList.add('hidden');toast(state.stage===0?'🌿 Знайди Міру біля села':'✨ З поверненням у Зоряний ліс!')});
 $('interactBtn').onclick=interact;$('attackBtn').onclick=attack;$('healBtn').onclick=heal;$('inventoryBtn').onclick=bag;
-$('mInteract').onclick=interact;$('mAttack').onclick=attack;$('mHeal').onclick=heal;$('mBag').onclick=bag;
+// React on touch-down instead of waiting for click: reliable while a second finger holds the stick.
+const mobileActionBindings=[['mInteract',interact],['mAttack',attack],['mHeal',heal],['mBag',bag]];
+for(const [id,action] of mobileActionBindings){
+ const btn=$(id);let lastTouch=-10000;
+ btn.addEventListener('pointerdown',e=>{
+  if(e.pointerType==='touch'||e.pointerType==='pen'){
+   e.preventDefault();lastTouch=performance.now();action();
+  }
+ });
+ btn.addEventListener('click',e=>{
+  if(performance.now()-lastTouch<650){e.preventDefault();return}
+  action();
+ });
+}
 $('pauseBtn').onclick=()=>setPause();$('resumeBtn').onclick=()=>setPause(false);$('restartBtn').onclick=reset;$('closeBagBtn').onclick=closeBag;$('winRestart').onclick=reset;
 $('winContinue').onclick=()=>{$('winOverlay').classList.add('hidden');state.paused=false};
+// Mobile controls v1.4: live layouts, analog joystick and independent multitouch actions.
+const CONTROL_STORAGE='emilys-adventures-controls-v1';
+const CONTROL_MODES=['auto','center','split','floating'];
+let controlPrefs={mode:'auto',dock:null};
+try{
+ const previous=JSON.parse(localStorage.getItem(CONTROL_STORAGE)||'{}');
+ if(CONTROL_MODES.includes(previous?.mode))controlPrefs.mode=previous.mode;
+ if(previous?.dock&&Number.isFinite(previous.dock.x)&&Number.isFinite(previous.dock.y)){
+  controlPrefs.dock={x:clampValue(previous.dock.x,0,1),y:clampValue(previous.dock.y,0,1)};
+ }
+}catch(_){}
+function saveControlPrefs(){try{localStorage.setItem(CONTROL_STORAGE,JSON.stringify(controlPrefs))}catch(_){}}
 const pressed=new Set();const arrowKeys=new Set(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space']);
-window.addEventListener('keydown',e=>{if(settingsOpen){if(e.code==='Escape'){e.preventDefault();closeSettings()}return}if(arrowKeys.has(e.code))e.preventDefault();pressed.add(e.code);if(e.repeat)return;if(e.code==='Escape'){if(settingsOpen)closeSettings();else if(state.bagOpen)closeBag();else if(state.inDialogue)$('nextDialogue').click();else setPause();}else if(e.code==='KeyE')interact();else if(e.code==='Space')attack();else if(e.code==='KeyQ')heal();else if(e.code==='KeyI'){if(state.bagOpen)closeBag();else bag()}});
-window.addEventListener('keyup',e=>pressed.delete(e.code));window.addEventListener('blur',()=>{pressed.clear();last=performance.now()});document.addEventListener('visibilitychange',()=>{if(!document.hidden)last=performance.now()});
-for(const btn of document.querySelectorAll('[data-move]')){const code=btn.dataset.move;btn.addEventListener('pointerdown',e=>{e.preventDefault();btn.setPointerCapture(e.pointerId);pressed.add(code)});for(const evt of ['pointerup','pointercancel','lostpointercapture'])btn.addEventListener(evt,()=>pressed.delete(code))}
+const joystick={active:false,pointerId:null,x:0,y:0,maxRadius:42};
+let editControlsMode=false;
+const joystickEl=$('mobileJoystick'),joystickKnob=$('joyKnob'),floatZone=$('floatingTouchZone'),actionDock=$('mobileActions');
+function effectiveLayout(){return controlPrefs.mode==='auto'?(innerHeight>=innerWidth?'center':'split'):controlPrefs.mode}
+function setJoystick(x,y){
+ joystick.x=x;joystick.y=y;
+ const tx=Math.round(x*joystick.maxRadius),ty=Math.round(y*joystick.maxRadius);
+ joystickKnob.style.transform=`translate(${tx}px, ${ty}px)`;
+ joystickEl.classList.toggle('active',joystick.active);
+}
+function endJoystick(e){
+ if(e&&e.pointerId!==undefined&&e.pointerId!==joystick.pointerId)return;
+ joystick.active=false;joystick.pointerId=null;setJoystick(0,0);
+}
+function dockAt(x,y){
+ const w=actionDock.offsetWidth,h=actionDock.offsetHeight;
+ const left=clampValue(x,6,Math.max(6,innerWidth-w-6));
+ const top=clampValue(y,6,Math.max(6,innerHeight-h-6));
+ actionDock.classList.add('custom-dock');
+ actionDock.style.setProperty('--dock-left',`${left}px`);
+ actionDock.style.setProperty('--dock-top',`${top}px`);
+ return {x:left/Math.max(1,innerWidth),y:top/Math.max(1,innerHeight)};
+}
+function applyDock(){
+ if(document.body.dataset.controlLayout==='floating'&&controlPrefs.dock){
+  dockAt(controlPrefs.dock.x*innerWidth,controlPrefs.dock.y*innerHeight);
+ }else{
+  actionDock.classList.remove('custom-dock');
+  actionDock.style.removeProperty('--dock-left');actionDock.style.removeProperty('--dock-top');
+ }
+}
+function applyControlLayout(){
+ const layout=effectiveLayout();
+ if(document.body.dataset.controlLayout!==layout){
+  endJoystick();
+  joystickEl.style.removeProperty('left');joystickEl.style.removeProperty('top');
+ }
+ document.body.dataset.controlLayout=layout;
+ $('controlLayout').value=controlPrefs.mode;
+ $('editControlsRow').hidden=layout!=='floating';
+ if(editControlsMode&&layout!=='floating')finishControlsEdit();
+ applyDock();
+}
+$('controlLayout').addEventListener('change',e=>{
+ controlPrefs.mode=CONTROL_MODES.includes(e.target.value)?e.target.value:'auto';
+ saveControlPrefs();applyControlLayout();
+});
+// Rotating a phone changes auto mode immediately. Explicit choices remain unchanged.
+window.addEventListener('resize',applyControlLayout);
+window.visualViewport?.addEventListener('resize',applyControlLayout);
+function setJoystickFromPointer(e){
+ const rect=joystickEl.getBoundingClientRect(),cx=rect.left+rect.width/2,cy=rect.top+rect.height/2;
+ joystick.maxRadius=Math.max(26,(rect.width-joystickKnob.offsetWidth)/2-5);
+ let dx=e.clientX-cx,dy=e.clientY-cy;
+ const len=Math.hypot(dx,dy);
+ if(len>joystick.maxRadius){dx=dx/len*joystick.maxRadius;dy=dy/len*joystick.maxRadius}
+ setJoystick(dx/joystick.maxRadius,dy/joystick.maxRadius);
+}
+function beginJoystick(e,floating){
+ if(editControlsMode||joystick.active||!state.started||state.paused||state.inDialogue||state.bagOpen||settingsOpen)return;
+ e.preventDefault();collapsePanels();walkTo=null;
+ joystick.active=true;joystick.pointerId=e.pointerId;
+ const owner=floating?floatZone:joystickEl;owner.setPointerCapture(e.pointerId);
+ if(floating){
+  const r=joystickEl.offsetWidth/2;
+  const cx=clampValue(e.clientX,r+5,innerWidth-r-5),cy=clampValue(e.clientY,r+5,innerHeight-r-5);
+  joystickEl.style.left=cx+'px';joystickEl.style.top=cy+'px';
+ }
+ setJoystickFromPointer(e);
+}
+joystickEl.addEventListener('pointerdown',e=>{if(effectiveLayout()!=='floating')beginJoystick(e,false)});
+floatZone.addEventListener('pointerdown',e=>{if(effectiveLayout()==='floating')beginJoystick(e,true)});
+for(const [element,floating] of [[joystickEl,false],[floatZone,true]]){
+ element.addEventListener('pointermove',e=>{if(!joystick.active||e.pointerId!==joystick.pointerId||floating!==(effectiveLayout()==='floating'))return;e.preventDefault();setJoystickFromPointer(e)});
+ for(const evt of ['pointerup','pointercancel','lostpointercapture'])element.addEventListener(evt,endJoystick);
+}
+function finishControlsEdit(){
+ editControlsMode=false;document.body.classList.remove('editing-controls');$('editControlsBanner').hidden=true;
+ saveControlPrefs();
+}
+function beginControlsEdit(){
+ if(effectiveLayout()!=='floating')return;
+ closeSettings();endJoystick();
+ editControlsMode=true;document.body.classList.add('editing-controls');$('editControlsBanner').hidden=false;
+}
+$('editControlsBtn').addEventListener('click',beginControlsEdit);
+$('finishControlsEdit').addEventListener('click',finishControlsEdit);
+$('resetControlsBtn').addEventListener('click',()=>{controlPrefs.dock=null;saveControlPrefs();applyDock()});
+let dockDrag=null;
+actionDock.addEventListener('pointerdown',e=>{
+ if(!editControlsMode)return;
+ e.preventDefault();
+ const rect=actionDock.getBoundingClientRect();
+ dockDrag={id:e.pointerId,dx:e.clientX-rect.left,dy:e.clientY-rect.top};
+ actionDock.setPointerCapture(e.pointerId);
+});
+actionDock.addEventListener('pointermove',e=>{
+ if(!editControlsMode||!dockDrag||e.pointerId!==dockDrag.id)return;
+ e.preventDefault();
+ controlPrefs.dock=dockAt(e.clientX-dockDrag.dx,e.clientY-dockDrag.dy);
+});
+for(const evt of ['pointerup','pointercancel','lostpointercapture'])actionDock.addEventListener(evt,e=>{
+ if(dockDrag?.id!==e.pointerId)return;
+ dockDrag=null;saveControlPrefs();
+});
+window.addEventListener('keydown',e=>{
+ if(editControlsMode){if(e.code==='Escape'){e.preventDefault();finishControlsEdit()}return}
+ if(settingsOpen){if(e.code==='Escape'){e.preventDefault();closeSettings()}return}
+ if(arrowKeys.has(e.code))e.preventDefault();pressed.add(e.code);
+ if(e.repeat)return;
+ if(e.code==='Escape'){if(state.bagOpen)closeBag();else if(state.inDialogue)$('nextDialogue').click();else setPause();}
+ else if(e.code==='KeyE')interact();else if(e.code==='Space')attack();else if(e.code==='KeyQ')heal();
+ else if(e.code==='KeyI'){if(state.bagOpen)closeBag();else bag()}
+});
+window.addEventListener('keyup',e=>pressed.delete(e.code));
+window.addEventListener('blur',()=>{pressed.clear();endJoystick();last=performance.now()});
+document.addEventListener('visibilitychange',()=>{if(document.hidden)endJoystick();else last=performance.now()});
+applyControlLayout();
 // Tapping the landscape establishes a walk destination (useful on phones).
 const raycaster=new THREE.Raycaster(),ndc=new THREE.Vector2(),plane=new THREE.Plane(new THREE.Vector3(0,1,0),0);let walkTo=null;
 canvas.addEventListener('pointerdown',e=>{if(!state.started||state.paused||state.inDialogue||state.bagOpen||settingsOpen)return;collapsePanels();const r=canvas.getBoundingClientRect();ndc.x=((e.clientX-r.left)/r.width)*2-1;ndc.y=-((e.clientY-r.top)/r.height)*2+1;raycaster.setFromCamera(ndc,camera);const point=new THREE.Vector3();if(raycaster.ray.intersectPlane(plane,point)){walkTo={x:THREE.MathUtils.clamp(point.x,-SCENE_RADIUS,SCENE_RADIUS),z:THREE.MathUtils.clamp(point.z,-SCENE_RADIUS,SCENE_RADIUS)}}});
@@ -273,10 +413,11 @@ function move(dx,dz){const nx=state.x+dx,nz=state.z+dz;if(canStand(nx,nz)){state
 function update(dt){if(!state.started||state.paused||state.inDialogue||state.bagOpen||settingsOpen)return;
  state.attackCD=Math.max(0,state.attackCD-dt);state.hitCD=Math.max(0,state.hitCD-dt);
  let sx=(pressed.has('KeyD')||pressed.has('ArrowRight')?1:0)-(pressed.has('KeyA')||pressed.has('ArrowLeft')?1:0),sy=(pressed.has('KeyS')||pressed.has('ArrowDown')?1:0)-(pressed.has('KeyW')||pressed.has('ArrowUp')?1:0);
+ if(!sx&&!sy&&Math.hypot(joystick.x,joystick.y)>.16){sx=joystick.x;sy=joystick.y}
  if(sx||sy)walkTo=null;
  if(!sx&&!sy&&walkTo){const dx=walkTo.x-state.x,dz=walkTo.z-state.z,dist=Math.hypot(dx,dz);if(dist<.27)walkTo=null;else{sx=(dx-dz)/Math.SQRT2;sy=(dx+dz)/Math.SQRT2}}
  let moving=false;
- if(sx||sy){const len=Math.hypot(sx,sy);sx/=len;sy/=len;const wx=(sx+sy)/Math.SQRT2,wz=(sy-sx)/Math.SQRT2;const oldX=state.x,oldZ=state.z;move(wx*3.75*dt,wz*3.75*dt);moving=Math.hypot(state.x-oldX,state.z-oldZ)>.0005;
+ if(sx||sy){const len=Math.hypot(sx,sy),analog=joystick.active&&!pressed.size&&!walkTo;const speed=analog?clampValue((len-.16)/.84,.20,1):1;sx/=len;sy/=len;const wx=(sx+sy)/Math.SQRT2,wz=(sy-sx)/Math.SQRT2;const oldX=state.x,oldZ=state.z;move(wx*3.75*speed*dt,wz*3.75*speed*dt);moving=Math.hypot(state.x-oldX,state.z-oldZ)>.0005;
   if(Math.abs(sx)>.25||Math.abs(sy)>.25)facing=Math.abs(sx)>Math.abs(sy)?(sx>0?'right':'left'):(sy>0?'down':'up');
  }
  if(moving){walkClock+=dt;frame=Math.floor(walkClock*7.6)%4}else{walkClock=0;frame=0}setHeroFrame(facing,frame);
