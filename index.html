@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#172b33">
 <title>Emily's Adventures | Таємниця зоряного лісу</title>
-<link rel="stylesheet" href="src/styles.css?v=1.8.0">
+<link rel="stylesheet" href="src/styles.css?v=1.8.3-cozy">
 </head>
 <body>
 <div id="game">
@@ -46,7 +46,7 @@
   <div class="overlay" id="startOverlay"><div class="intro"><div class="introCopy"><div class="tag">✧ Казкова RPG-пригода</div><h1>Emily's<br><em>Adventures</em></h1><p>Десь серед шепоту старих дерев згасають три зоряні кристали. Маленька Емілі вирушає в ліс, де на неї чекають дивовижні зустрічі, таємниці й хоробрість.</p><button class="primary" id="startBtn">Розпочати пригоду ✨</button><div class="footnote">THREE.JS · ЗРОБЛЕНО З ЛЮБОВ'Ю ДО ПРИГОД</div></div><div class="introPic"><div class="moon"></div><img id="introPortrait" alt="Піксельна Емілі" src="assets/hero/emily-portrait.png"></div></div></div>
   <div class="overlay hidden" id="settingsOverlay" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
     <div class="settingsModal">
-      <div class="settingsHeader"><div><span class="settingsKicker">⚙️ ПАРАМЕТРИ ГРИ <span class="gameVersion" aria-label="Версія гри">v1.8.0</span></span><h2 id="settingsTitle">Налаштування графіки</h2><p>Підбери комфортну плавність для свого пристрою. Зміни застосовуються одразу.</p></div><button class="settingsClose" id="closeSettingsBtn" aria-label="Закрити налаштування">✕</button></div>
+      <div class="settingsHeader"><div><span class="settingsKicker">⚙️ ПАРАМЕТРИ ГРИ <span class="gameVersion" aria-label="Версія гри">v1.8.3</span></span><h2 id="settingsTitle">Налаштування графіки</h2><p>Підбери комфортну плавність для свого пристрою. Зміни застосовуються одразу.</p></div><button class="settingsClose" id="closeSettingsBtn" aria-label="Закрити налаштування">✕</button></div>
       <div class="settingsBody">
         <div class="settingRow"><label for="controlLayout">Мобільне керування <small id="controlLayoutHint" aria-live="polite">Автоматично: центр вертикально, два пальці горизонтально</small></label><select id="controlLayout"><option value="auto">📱 Автоматично</option><option value="center">🎯 Центр + дуга</option><option value="split">👐 Два великі пальці</option><option value="floating">🕹️ Вільний джойстик</option></select></div>
         <div class="settingRow" id="editControlsRow" hidden><label>Вільне розташування <small>Джойстик з’являється під пальцем, блок дій можна пересунути</small></label><div class="controlEditActions"><button type="button" class="secondary" id="editControlsBtn">↔ Пересунути</button><button type="button" class="secondary" id="resetControlsBtn">↺ Скинути</button></div></div>
@@ -86,7 +86,7 @@
   <div class="overlay hidden" id="winOverlay"><div class="smallModal"><div style="font-size:46px">🌟</div><h2>Ліс знову сяє!</h2><p>Емілі повернула зоряне світло до стародавнього вівтаря. Це кінець першого розділу, але початок великої історії. Дякуємо за пригоду!</p><div class="actions"><button class="primary" id="winContinue">Ще погуляти 🌿</button><button class="secondary" id="winRestart">Нова пригода</button></div></div></div>
   <div id="fatal">Не вдалося завантажити Three.js. Для запуску гри потрібен інтернет, оскільки 3D-рушій завантажується з CDN. Перевір з'єднання та перезавантаж сторінку.</div>
 </div>
-<script src="src/main.js?v=1.8.0" defer></script>
+<script src="src/main.js?v=1.8.3-cozy" defer></script>
 
 </body>
 </html>

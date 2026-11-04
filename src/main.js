@@ -135,86 +135,96 @@ window.visualViewport?.addEventListener('resize',resize);
 resize();
 scene.add(new THREE.HemisphereLight(0xcdf8ef,0x83a67d,2.3));
 const sun=new THREE.DirectionalLight(0xffebc5,2.65);sun.position.set(-10,23,12);sun.castShadow=true;sun.shadow.mapSize.set(graphics.shadows==='off'?512:Number(graphics.shadows),graphics.shadows==='off'?512:Number(graphics.shadows));sun.shadow.camera.left=-25;sun.shadow.camera.right=25;sun.shadow.camera.top=25;sun.shadow.camera.bottom=-25;sun.shadow.camera.near=.5;sun.shadow.camera.far=70;sun.shadow.bias=-.0003;scene.add(sun);
-// v1.8 · Pixel-world. All world textures are original 32px tiles in assets/world/.
-// Keep Three.js geometry and gameplay collision, but replace smooth primitives with
-// crisp, stepped voxels. The forest is INSTANCED to avoid hundreds of draw calls.
-const mat=(color,other={})=>new THREE.MeshStandardMaterial({color,roughness:1,metalness:0,flatShading:true,...other});
+// v1.8.3 · Original cozy pixel-art world. Render 2D painted sprites in the
+// existing isometric Three.js scene, not Minecraft/voxel geometry.
+// All visual textures are hand-authored PNGs in assets/world/; save-game
+// coordinates, quest triggers, enemy AI and the 16 original Emily frames stay intact.
+const mat=(color,other={})=>new THREE.MeshBasicMaterial({color,...other});
 const loader=new THREE.TextureLoader();
-function pixelTex(filename,rx=1,ry=1){
- const tex=loader.load('assets/world/'+filename);
- tex.colorSpace=THREE.SRGBColorSpace;tex.magFilter=THREE.NearestFilter;tex.minFilter=THREE.NearestMipmapNearestFilter;
- tex.wrapS=tex.wrapT=THREE.RepeatWrapping;tex.repeat.set(rx,ry);tex.anisotropy=1;
- return tex;
+const assetTextures=new Map();
+function artTexture(filename,rx=1,ry=1){
+ const key=filename+'|'+rx+'|'+ry;
+ if(assetTextures.has(key))return assetTextures.get(key);
+ const texture=loader.load('assets/world/'+filename);
+ texture.colorSpace=THREE.SRGBColorSpace;
+ texture.magFilter=THREE.NearestFilter;
+ texture.minFilter=THREE.NearestMipmapNearestFilter;
+ texture.wrapS=texture.wrapT=THREE.RepeatWrapping;
+ texture.repeat.set(rx,ry);texture.anisotropy=1;
+ assetTextures.set(key,texture);return texture;
 }
-const grass=mat(0xffffff,{map:pixelTex('grass.png',26,26)}),
- darkGrass=mat(0x5f9472),lightGrass=mat(0x8bbf92),
- pathMat=mat(0xffffff,{map:pixelTex('path.png',2,9)}),
- trunkMat=mat(0xffffff,{map:pixelTex('wood.png')}),
- leafTex=pixelTex('leaves.png'),
- leafA=mat(0xa9e3d5,{map:leafTex}),leafB=mat(0xe3f4d9,{map:leafTex}),leafC=mat(0xd5eec0,{map:leafTex}),
- leafHighlight=mat(0xa4d39d),leafShade=mat(0x467965),
- rockMat=mat(0x9caeaa),stoneLight=mat(0xc3c9b0),
- flowerYellow=mat(0xffd891,{emissive:0x5f3918,emissiveIntensity:.1}),flowerPink=mat(0xf8a5be),
- blue=mat(0xa2f7f4,{emissive:0x358b93,emissiveIntensity:.45});
-const wallMat=mat(0xffffff,{map:pixelTex('wall.png')}),roofMat=mat(0xffffff,{map:pixelTex('roof.png')}),doorMat=mat(0xffffff,{map:pixelTex('wood.png')});
-const add=(mesh,x,y,z,cast=false)=>{mesh.position.set(x,y,z);mesh.castShadow=cast;mesh.receiveShadow=true;scene.add(mesh);return mesh};
-const voxelGeometry=new THREE.BoxGeometry(1,1,1);
-function cube(x,y,z,w,h,d,material,cast=false){return add(new THREE.Mesh(new THREE.BoxGeometry(w,h,d),material),x,y,z,cast)}
-function groupCube(group,x,y,z,w,h,d,material){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),material);m.position.set(x,y,z);m.castShadow=true;m.receiveShadow=true;group.add(m);return m}
+function spriteMaterial(filename){return new THREE.SpriteMaterial({map:artTexture(filename),transparent:true,alphaTest:.27,depthWrite:true,color:0xffffff})}
+function pixelSprite(filename,x,z,w,h,y=h/2){
+ const sprite=new THREE.Sprite(spriteMaterial(filename));sprite.position.set(x,y,z);sprite.scale.set(w,h,1);scene.add(sprite);return sprite;
+}
+const add=(mesh,x,y,z,cast=false)=>{mesh.position.set(x,y,z);mesh.castShadow=cast;mesh.receiveShadow=false;scene.add(mesh);return mesh};
+const grass=mat(0xffffff,{map:artTexture('grass.png',27,27)});
 const ground=add(new THREE.Mesh(new THREE.PlaneGeometry(52,52),grass),0,-.08,0);ground.rotation.x=-Math.PI/2;
 let seed=3391;const rand=()=>((seed=(1664525*seed+1013904223)>>>0)/4294967296),between=(a,b)=>a+(b-a)*rand();
 function disk(x,z,r,color,y=.001,segments=20){const o=new THREE.Mesh(new THREE.CircleGeometry(r,segments),color);o.rotation.x=-Math.PI/2;o.position.set(x,y,z);scene.add(o);return o}
-// Square palette patches, batched for minimal GPU overhead. Random calls match v1.7
-// to preserve the placement of trees around existing saved character positions.
+// The camera orientation is fixed (only the target moves), so all decorative
+// sprites can be instanced with one shared billboard orientation per material.
+const billboardObject=new THREE.Object3D();billboardObject.lookAt(13.7,19,13.7);
+const billboardQuat=billboardObject.quaternion.clone();
+const billboardGeometry=new THREE.PlaneGeometry(1,1);
+function spriteBatch(filename,instances){
+ if(!instances.length)return null;
+ const material=new THREE.MeshBasicMaterial({map:artTexture(filename),transparent:false,alphaTest:.25,side:THREE.DoubleSide,depthWrite:true});
+ const mesh=new THREE.InstancedMesh(billboardGeometry,material,instances.length),dummy=new THREE.Object3D();
+ instances.forEach((p,i)=>{
+  dummy.position.set(p.x,p.h/2+p.floorY,p.z);dummy.quaternion.copy(billboardQuat);
+  dummy.scale.set(p.w,p.h,1);dummy.updateMatrix();mesh.setMatrixAt(i,dummy.matrix);
+ });
+ mesh.instanceMatrix.needsUpdate=true;mesh.frustumCulled=false;scene.add(mesh);return mesh;
+}
 const groundDetails=[],patchBatches=[[],[]];
+// Preserve earlier random-number consumption to keep preexisting tree positions.
 for(let i=0;i<94;i++){
  const x=between(-23,23),z=between(-23,23),size=between(.35,1.85),t=rand()>.5?1:0;
  patchBatches[t].push({x,z,size});
 }
-for(let i=0;i<2;i++){
- const spots=patchBatches[i],geometry=new THREE.PlaneGeometry(1,1);
- const mesh=new THREE.InstancedMesh(geometry,i?lightGrass:darkGrass,spots.length),dummy=new THREE.Object3D();
- spots.forEach((p,k)=>{dummy.position.set(p.x,-.075,p.z);dummy.rotation.set(-Math.PI/2,0,0);dummy.scale.set(p.size*1.55,p.size*.9,1);dummy.updateMatrix();mesh.setMatrixAt(k,dummy.matrix)});
+// Small painted meadow clusters lie flat on the grass.
+const patchTexture=artTexture('meadow-patch.png');
+for(const spots of patchBatches){
+ const mesh=new THREE.InstancedMesh(new THREE.PlaneGeometry(1,1),new THREE.MeshBasicMaterial({map:patchTexture,transparent:false,alphaTest:.20,side:THREE.DoubleSide,depthWrite:false}),spots.length),dummy=new THREE.Object3D();
+ spots.forEach((p,i)=>{
+  dummy.position.set(p.x,-.073,p.z);dummy.rotation.set(-Math.PI/2,0,0);
+  dummy.scale.set(p.size*1.5,p.size*.75,1);dummy.updateMatrix();mesh.setMatrixAt(i,dummy.matrix)
+ });
  mesh.instanceMatrix.needsUpdate=true;scene.add(mesh);groundDetails.push(mesh);
 }
 function path(a,b,width=.92){
  const dx=b.x-a.x,dz=b.z-a.z,len=Math.hypot(dx,dz);
- const m=new THREE.Mesh(new THREE.PlaneGeometry(width,len),mat(0xffffff,{map:pixelTex('path.png',width/.85,len/1.15)}));
- m.rotation.set(-Math.PI/2,0,Math.atan2(dx,dz));m.position.set((a.x+b.x)/2,-.053,(a.z+b.z)/2);scene.add(m);
- // Consume the legacy stepping-stone random draws to preserve tree positions.
+ const texture=artTexture('path.png',width/.85,len/1.15);
+ const obj=new THREE.Mesh(new THREE.PlaneGeometry(width,len),new THREE.MeshBasicMaterial({map:texture,side:THREE.DoubleSide}));
+ obj.rotation.set(-Math.PI/2,0,Math.atan2(dx,dz));obj.position.set((a.x+b.x)/2,-.053,(a.z+b.z)/2);scene.add(obj);
  for(let i=0;i<Math.ceil(len/1.15);i++){between(-.12,.12);between(-.12,.12);between(.07,.16)}
 }
-path({x:-7,z:-4},{x:1,z:-1},1.35);path({x:1,z:-1},{x:2,z:-12.5},1.1);
-path({x:1,z:-1},{x:12,z:-7},.9);path({x:1,z:-1},{x:-13,z:9},.7);
-// The pond has a transparent, jagged 8-bit silhouette and pixel highlights.
-const pond=add(new THREE.Mesh(new THREE.PlaneGeometry(7.3,7.3),new THREE.MeshBasicMaterial({map:pixelTex('pond.png'),transparent:true,depthWrite:false,side:THREE.DoubleSide})), -11,-.036,-9);
-pond.rotation.x=-Math.PI/2;pond.scale.set(1.23,.7,1);
+path({x:-7,z:-4},{x:1,z:-1},1.35);
+path({x:1,z:-1},{x:2,z:-12.5},1.1);
+path({x:1,z:-1},{x:12,z:-7},.9);
+path({x:1,z:-1},{x:-13,z:9},.7);
+// Water has a scalloped illustrated silhouette with embedded pixel highlights.
+const pond=add(new THREE.Mesh(new THREE.PlaneGeometry(8.2,6.9),new THREE.MeshBasicMaterial({map:artTexture('pond.png'),transparent:true,alphaTest:.06,depthWrite:false,side:THREE.DoubleSide})), -11,-.037,-9);
+pond.rotation.x=-Math.PI/2;
+const lilies=[];
 for(let i=0;i<10;i++){
  const angle=rand()*Math.PI*2,r=rand()*2.4,rad=between(.1,.21);
- cube(-11+Math.cos(angle)*r,-.022,-9+Math.sin(angle)*r,rad*1.8,.016,rad*1.8,leafShade);
+ lilies.push({x:-11+Math.cos(angle)*r,z:-9+Math.sin(angle)*r,rad});
 }
+const lilyTex=artTexture('lily.png');
+const lilyMesh=new THREE.InstancedMesh(new THREE.PlaneGeometry(1,1),new THREE.MeshBasicMaterial({map:lilyTex,alphaTest:.25,side:THREE.DoubleSide}),lilies.length),lilyDummy=new THREE.Object3D();
+lilies.forEach((p,i)=>{lilyDummy.position.set(p.x,-.03,p.z);lilyDummy.rotation.set(-Math.PI/2,0,0);lilyDummy.scale.set(p.rad*2.6,p.rad*1.9,1);lilyDummy.updateMatrix();lilyMesh.setMatrixAt(i,lilyDummy.matrix)});
+lilyMesh.instanceMatrix.needsUpdate=true;scene.add(lilyMesh);
 const solids=[];function solid(x,z,r){solids.push({x,z,r})}
-// Forest is batched by material. A leaf block costs only an instance, not a draw call.
-const forestBatches=new Map();
-function forestVoxel(material,x,y,z,w,h,d){
- if(!forestBatches.has(material))forestBatches.set(material,[]);
- forestBatches.get(material).push({x,y,z,w,h,d});
-}
+// Trees: four illustrated varieties, rendered as four instanced sprite batches.
+const treeTypes=['tree-oak.png','tree-orchard.png','tree-bloom.png','tree-pine.png'];
+const treeSprites=[[],[],[],[]];
 function tree(x,z,scale=1,colorIndex=0){
- const crown=[leafA,leafB,leafC][colorIndex%3];
- forestVoxel(trunkMat,x,.63*scale,z,.36*scale,1.26*scale,.36*scale);
  const conifer=rand()<.52;
- if(conifer){rand(); // Same random consumption as the old cone rotation.
-  forestVoxel(crown,x,1.40*scale,z,1.52*scale,.72*scale,1.52*scale);
-  forestVoxel(crown,x,1.95*scale,z,1.17*scale,.72*scale,1.17*scale);
-  forestVoxel(crown,x,2.47*scale,z,.75*scale,.68*scale,.75*scale);
-  forestVoxel(leafShade,x-.52*scale,1.26*scale,z+.58*scale,.23*scale,.21*scale,.25*scale);
- }else{
-  forestVoxel(crown,x,1.55*scale,z,1.67*scale,.84*scale,1.55*scale);
-  forestVoxel(crown,x+.24*scale,2.07*scale,z-.16*scale,1.23*scale,.66*scale,1.23*scale);
-  forestVoxel(leafHighlight,x-.58*scale,1.94*scale,z+.34*scale,.4*scale,.36*scale,.46*scale);
-  forestVoxel(leafShade,x+.55*scale,1.35*scale,z+.4*scale,.36*scale,.3*scale,.37*scale);
- }
+ if(conifer)rand(); // preserve original position RNG
+ const type=conifer?3:colorIndex%3;
+ treeSprites[type].push({x,z,w:2.65*scale,h:3.81*scale,floorY:-.07});
  solid(x,z,.38*scale);
 }
 const clearings=[{x:0,z:-1,r:4.7},{x:-7,z:-4,r:4.0},{x:sageAt.x,z:sageAt.z,r:2.8},{x:shrineAt.x,z:shrineAt.z,r:3.25},...crystalsAt.map(c=>({...c,r:3.4})),{x:-11,z:-9,r:4.1}];
@@ -224,67 +234,41 @@ for(let i=0,tries=0;i<135&&tries<1000;tries++){
  if(!allowedTree(x,z)||Math.hypot(x,z)>29)continue;
  tree(x,z,between(.72,1.34),Math.floor(rand()*3));i++;
 }
-const forestMeshes=[];const forestDummy=new THREE.Object3D();
-for(const [material,spots] of forestBatches){
- const mesh=new THREE.InstancedMesh(voxelGeometry,material,spots.length);
- for(let i=0;i<spots.length;i++){
-  const p=spots[i];forestDummy.position.set(p.x,p.y,p.z);forestDummy.rotation.set(0,0,0);
-  forestDummy.scale.set(p.w,p.h,p.d);forestDummy.updateMatrix();mesh.setMatrixAt(i,forestDummy.matrix);
- }
- mesh.instanceMatrix.needsUpdate=true;mesh.castShadow=true;mesh.receiveShadow=true;mesh.computeBoundingSphere();scene.add(mesh);forestMeshes.push(mesh);
-}
-// Three instanced groups for tiny pixel flowers.
+const forestMeshes=treeTypes.map((name,i)=>spriteBatch(name,treeSprites[i])).filter(Boolean);
 const flowerSpots=[];
-for(let i=0;i<185;i++){let x=between(-21,21),z=between(-21,21);if(Math.hypot(x+11,z+9)<3.6)continue;flowerSpots.push({x,z,pink:rand()>.49})}
-function placeInstances(mesh,spots,y,scale){const dummy=new THREE.Object3D();spots.forEach((p,i)=>{dummy.position.set(p.x,y,p.z);dummy.rotation.set(0,0,0);dummy.scale.set(...scale);dummy.updateMatrix();mesh.setMatrixAt(i,dummy.matrix)});mesh.instanceMatrix.needsUpdate=true;mesh.receiveShadow=true;scene.add(mesh)}
-const flowerDetails=[];
-const flowerStem=new THREE.InstancedMesh(new THREE.BoxGeometry(.032,.17,.032),leafB,flowerSpots.length);
-placeInstances(flowerStem,flowerSpots,.052,[1,1,1]);flowerDetails.push(flowerStem);
-for(const [pink,color] of [[true,flowerPink],[false,flowerYellow]]){
- const spots=flowerSpots.filter(p=>p.pink===pink);if(!spots.length)continue;
- const heads=new THREE.InstancedMesh(new THREE.BoxGeometry(.12,.11,.12),color,spots.length);
- placeInstances(heads,spots,.14,[1,1,1]);flowerDetails.push(heads);
-}
-const rockInstances=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),rockMat,68),rockDummy=new THREE.Object3D();let rockCount=0;
+for(let i=0;i<185;i++){const x=between(-21,21),z=between(-21,21);if(Math.hypot(x+11,z+9)<3.6)continue;flowerSpots.push({x,z,pink:rand()>.49})}
+const flowerDetails=[spriteBatch('flower.png',flowerSpots.map(p=>({x:p.x,z:p.z,w:.35,h:.42,floorY:-.09})))];
+// Preserve the legacy stone distribution and use pixel-painted pebbles instead of boxes.
+const rockSpots=[];
 for(let i=0;i<68;i++){
- let x=between(-22,22),z=between(-22,22);if(clearings.some(p=>Math.hypot(x-p.x,z-p.z)<p.r*.6))continue;
- const r=between(.1,.37);rockDummy.position.set(x,.065,z);rockDummy.rotation.set(0,Math.round(rand()*3)*Math.PI/2,0);
- rockDummy.scale.set(r*1.25,r*.6,r*.85);rockDummy.updateMatrix();rockInstances.setMatrixAt(rockCount++,rockDummy.matrix);
+ const x=between(-22,22),z=between(-22,22);if(clearings.some(p=>Math.hypot(x-p.x,z-p.z)<p.r*.6))continue;
+ const r=between(.1,.37);rand(); // preserve old quarter-turn random draw
+ rockSpots.push({x,z,w:Math.max(.3,r*3.1),h:Math.max(.25,r*1.7),floorY:-.05});
 }
-rockInstances.count=rockCount;rockInstances.instanceMatrix.needsUpdate=true;rockInstances.receiveShadow=true;scene.add(rockInstances);
+const rockInstances=spriteBatch('stone.png',rockSpots);
+const shrubs=[];
+for(let i=0;i<56;i++){
+ const x=between(-22,22),z=between(-22,22);
+ if(!allowedTree(x,z))continue;
+ shrubs.push({x,z,w:between(.55,1.0),h:between(.45,.8),floorY:-.04});
+}
+const shrubDetails=spriteBatch('shrub.png',shrubs);
 function setDecorations(level){
  const all=level==='high',medium=level==='medium';
- flowerDetails.forEach(o=>{o.visible=all||medium});
- rockInstances.visible=all;
+ flowerDetails.forEach(o=>{if(o)o.visible=all||medium});
+ if(rockInstances)rockInstances.visible=all;
+ if(shrubDetails)shrubDetails.visible=all||medium;
  groundDetails.forEach((o,i)=>{o.visible=all||(medium&&i===0)});
 }
-// Stepped 8-bit cottage: brick wall tiles, timber door and chunky roof shingles.
+// Painted 2D cottage. The world-space obstacle retains its original coordinates.
 function house(x,z){
- cube(x,.17,z,3.25,.34,2.88,rockMat,true);
- cube(x,1.18,z,3.10,2.1,2.72,wallMat,true);
- cube(x-1.43,1.16,z,.25,2.14,2.88,stoneLight,true);
- cube(x+1.43,1.16,z,.25,2.14,2.88,stoneLight,true);
- cube(x,.67,z+1.4,.86,1.35,.10,doorMat);
- cube(x+.26,.74,z+1.49,.10,.10,.055,flowerYellow);
- for(const xx of [-1.03,1.03]){
-  cube(x+xx,1.55,z+1.43,.61,.62,.09,doorMat);
-  cube(x+xx,1.55,z+1.51,.46,.48,.085,blue);
-  cube(x+xx,1.55,z+1.56,.08,.5,.04,wallMat);
-  cube(x+xx,1.55,z+1.57,.49,.07,.04,wallMat);
- }
- [[3.66,3.2,2.46],[3.28,2.90,2.73],[2.63,2.39,3.02],[1.75,1.68,3.28]].forEach(([w,d,y])=>cube(x,y,z,w,.30,d,roofMat,true));
- cube(x+.94,3.58,z-.54,.48,.83,.50,wallMat,true);
- cube(x+.94,3.98,z-.54,.62,.16,.64,rockMat,true);
- solid(x,z,2.0);
+ const art=pixelSprite('cottage.png',x,z,5.10,4.73,2.34);
+ solid(x,z,2.0);return art;
 }
 house(-7,-4);
-// Square fountain with a pixel water surface and a blocky spring.
 const fountainAt={x:3,z:1};
-for(const [px,pz,w,d] of [[3,-.22,2.75,.36],[3,2.22,2.75,.36],[1.78,1,.36,2.75],[4.22,1,.36,2.75]])cube(px,.23,pz,w,.46,d,rockMat,true);
-cube(3,.12,1,2.2,.20,2.2,mat(0x6ab6b9));
-cube(3,.26,1,2.12,.04,2.12,mat(0x9fe0da,{emissive:0x235c69,emissiveIntensity:.15}));
-cube(3,.57,1,.45,.73,.45,stoneLight,true);
-cube(3,1.04,1,.32,.31,.32,blue);solid(3,1,1.36);
+pixelSprite('fountain.png',fountainAt.x,fountainAt.z,3.0,2.55,1.28);
+solid(3,1,1.36);
 function signLabel(text,x,y,z,w=2.85){
  const c=document.createElement('canvas');c.width=512;c.height=112;const g=c.getContext('2d');
  g.fillStyle='#153a47da';g.beginPath();g.roundRect(4,5,504,102,20);g.fill();g.strokeStyle='#c6f6d355';g.lineWidth=4;g.stroke();
@@ -292,68 +276,40 @@ function signLabel(text,x,y,z,w=2.85){
  const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;
  const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthWrite:false}));sprite.position.set(x,y,z);sprite.scale.set(w,w*112/512,1);scene.add(sprite);return sprite;
 }
-// Míra is also a tiny voxel creature. Keep the same scene position and dialogue.
 const sage=new THREE.Group();sage.position.set(sageAt.x,0,sageAt.z);scene.add(sage);
-const owlCream=mat(0xf3e3b8),owlTan=mat(0xcab17d),owlEyes=mat(0x384c5c),owlHighlight=mat(0xffffff),owlBeak=mat(0xe9a16a);
-groupCube(sage,0,.75,0,.76,.97,.70,owlTan);
-groupCube(sage,0,1.40,0,.89,.74,.72,owlCream);
-for(const x of [-.32,.32])groupCube(sage,x,1.83,0,.24,.26,.25,owlTan);
-for(const x of [-.20,.20]){
- groupCube(sage,x,1.46,.39,.22,.23,.08,owlEyes);
- groupCube(sage,x-.044,1.50,.44,.077,.075,.03,owlHighlight);
-}
-groupCube(sage,0,1.19,.47,.14,.16,.12,owlBeak);
-for(const x of [-.39,.39])groupCube(sage,x,.76,0,.15,.42,.49,owlCream);
-const sageLabel=signLabel('✦  Міра · хранителька',sageAt.x,2.5,sageAt.z,3.2);
-// Pixel shrine and rotating magic prism, while retaining the quest destination.
-cube(shrineAt.x,.14,shrineAt.z,3.64,.36,3.64,rockMat,true);
-cube(shrineAt.x,.43,shrineAt.z,2.90,.25,2.90,stoneLight,true);
-for(const x of [-1.15,1.15])for(const z of [-1.15,1.15]){
- cube(shrineAt.x+x,.86,shrineAt.z+z,.34,.96,.34,stoneLight,true);
- cube(shrineAt.x+x,1.42,shrineAt.z+z,.47,.15,.47,rockMat,true);
-}
-const altarCrystal=new THREE.Group();altarCrystal.position.set(shrineAt.x,1.42,shrineAt.z);scene.add(altarCrystal);
-const prismMat=mat(0xb7f6f2,{emissive:0x4fa9ab,emissiveIntensity:.40}),prismLight=mat(0xd2ffff,{emissive:0x79eded,emissiveIntensity:.5});
-groupCube(altarCrystal,0,0,0,.62,.65,.62,prismMat);
-groupCube(altarCrystal,0,.43,0,.36,.27,.36,prismLight);
-groupCube(altarCrystal,0,-.42,0,.32,.28,.32,prismMat);
-altarCrystal.rotation.z=.15;
-signLabel('✧  Зоряний вівтар',shrineAt.x,3.06,shrineAt.z,3.05);
-// Square crystal sprites built from light-catching voxels. Gameplay objects unchanged.
+const mira=new THREE.Sprite(spriteMaterial('mira.png'));mira.position.y=1.04;mira.scale.set(1.48,1.94,1);sage.add(mira);
+const sageLabel=signLabel('✦  Міра · хранителька',sageAt.x,2.55,sageAt.z,3.2);
+// The shrine is a painted environment sprite; the magic crystal is independent
+// so it can still bob and shimmer like before.
+pixelSprite('shrine.png',shrineAt.x,shrineAt.z,3.95,3.43,1.71);
+const altarCrystal=pixelSprite('crystal-altar.png',shrineAt.x,shrineAt.z,1.0,1.30,1.42);
+signLabel('✧  Зоряний вівтар',shrineAt.x,3.26,shrineAt.z,3.05);
+const crystalArt=['crystal-dawn.png','crystal-dusk.png','crystal-hope.png'];
 const collectibles=crystalsAt.map((p,i)=>{
  const group=new THREE.Group();group.position.set(p.x,0,p.z);scene.add(group);
- const c=new THREE.Group();c.position.y=1.03;group.add(c);
- const color=mat([0xffd59a,0xa5ceff,0xffb5e1][i],{emissive:[0xee8752,0x567fc2,0xcd5db7][i],emissiveIntensity:.52});
- const accent=mat([0xffedb7,0xd7e5ff,0xffe0f1][i],{emissive:[0xffc074,0xa5cbff,0xffa9e9][i],emissiveIntensity:.4});
- groupCube(c,0,0,0,.51,.61,.51,color);
- groupCube(c,0,.41,0,.30,.25,.30,accent);
- groupCube(c,0,-.41,0,.28,.23,.28,color);
- const ring=new THREE.Mesh(new THREE.TorusGeometry(.60,.048,4,4),mat(0xd6fff9,{emissive:0x6eaea7,emissiveIntensity:.65}));
- ring.rotation.x=Math.PI/2;ring.rotation.z=Math.PI/4;ring.position.y=.13;group.add(ring);
- const light=new THREE.PointLight([0xffd79f,0x8fb8ff,0xf4a3d9][i],1.0,4);light.position.y=1;group.add(light);
+ const c=new THREE.Sprite(spriteMaterial(crystalArt[i]));c.scale.set(.87,1.22,1);c.position.y=1.03;group.add(c);
+ const ring=new THREE.Mesh(new THREE.TorusGeometry(.60,.042,4,16),new THREE.MeshBasicMaterial({color:0x9de6cb,transparent:true,opacity:.84,depthWrite:false}));
+ ring.rotation.x=Math.PI/2;ring.position.y=.13;group.add(ring);
+ const light=new THREE.PointLight([0xffd79f,0x8fb8ff,0xf4a3d9][i],.8,3.5);light.position.y=1;group.add(light);
  const label=signLabel('◆  '+p.name,p.x,2.17,p.z,3.1);
  group.visible=!state.collected[i];label.visible=!state.collected[i];return {group,c,ring,label,...p};
 });
-// Original 16-frame pixel sprite remains untouched.
+// Original 16-frame pixel character retained exactly as supplied.
 const atlasTex=new THREE.TextureLoader().load(atlasURL);atlasTex.colorSpace=THREE.SRGBColorSpace;
 atlasTex.minFilter=THREE.NearestFilter;atlasTex.magFilter=THREE.NearestFilter;atlasTex.generateMipmaps=false;atlasTex.repeat.set(.25,.25);
 const heroMaterial=new THREE.SpriteMaterial({map:atlasTex,transparent:true,alphaTest:.035,depthWrite:false,opacity:1});
 const hero=new THREE.Sprite(heroMaterial);hero.scale.set(1.64,1.91,1);hero.position.set(state.x,1.03,state.z);scene.add(hero);
-const heroShadow=disk(state.x,state.z,.62,mat(0x436e64,{transparent:true,opacity:.25}),-.007,12);heroShadow.scale.set(1,.56,1);
+const shadowTexture=artTexture('shadow.png');
+function pixelShadow(x,z,w,h){const shadow=new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshBasicMaterial({map:shadowTexture,transparent:true,depthWrite:false}));shadow.rotation.x=-Math.PI/2;shadow.position.set(x,-.006,z);scene.add(shadow);return shadow}
+const heroShadow=pixelShadow(state.x,state.z,1.35,.75);
 const directionRows={down:0,left:1,right:2,up:3};let facing='down',frame=0,walkClock=0,shownFrame='';
 function setHeroFrame(dir,index){const key=dir+index;if(key===shownFrame)return;shownFrame=key;atlasTex.offset.set(index*.25,(3-directionRows[dir])*.25)}
 setHeroFrame('down',0);
-// Block-shaped shadow spirits, same combat HP and AI as before.
 const enemies=[{x:6.6,z:8},{x:-9.8,z:3},{x:14.6,z:5},{x:-10.7,z:-13}].map((p,index)=>{
  const group=new THREE.Group();group.position.set(p.x,0,p.z);scene.add(group);
- const body=new THREE.Mesh(new THREE.BoxGeometry(.78,.84,.75),mat(0x635a86,{emissive:0x282347,emissiveIntensity:.35}));body.position.y=.75;group.add(body);
- groupCube(group,0,1.28,0,.6,.36,.62,mat(0x766895));
- for(const x of [-.2,.2]){
-  groupCube(group,x,.92,.41,.11,.14,.07,mat(0xffb8dd,{emissive:0xea73b0,emissiveIntensity:.7}));
-  groupCube(group,x*1.55,1.51,0,.16,.28,.22,mat(0x5b567a));
- }
- const shadow=disk(p.x,p.z,.53,mat(0x364d60,{transparent:true,opacity:.34}),-.008,10);
- const halo=new THREE.Mesh(new THREE.TorusGeometry(.60,.03,4,4),mat(0xd1a7f4,{emissive:0x704bb0,emissiveIntensity:.7}));halo.rotation.x=Math.PI/2;halo.position.y=.06;group.add(halo);
+ const body=new THREE.Sprite(spriteMaterial('spirit.png'));body.scale.set(1.35,1.58,1);body.position.y=.90;group.add(body);
+ const shadow=pixelShadow(p.x,p.z,.98,.55);
+ const halo=new THREE.Mesh(new THREE.TorusGeometry(.60,.034,4,16),new THREE.MeshBasicMaterial({color:0xc4a1e4,transparent:true,opacity:.75,depthWrite:false}));halo.rotation.x=Math.PI/2;halo.position.y=.045;group.add(halo);
  return {group,body,shadow,x:p.x,z:p.z,spawn:{...p},hp:2,alive:true,attackTimer:0,phase:index*2.1};
 });
 
@@ -383,7 +339,8 @@ function applyMagicHit(enemy,wave,distance){
  // At very close range the automatic spell is stronger; the edge keeps normal damage.
  const damage=wave.mode==='auto'&&distance<=1.25?2:1;
  enemy.hp-=damage;
- enemy.body.material.emissive.setHex(0xbb8899);
+ enemy.body.material.color.setHex(0xffc7e7);
+ setTimeout(()=>{if(enemy.alive)enemy.body.material.color.setHex(0xffffff)},165);
  if(enemy.hp<=0){
   enemy.alive=false;enemy.group.visible=false;enemy.shadow.visible=false;
   state.coins+=5;state.kills++;pulse(enemy.x,enemy.z,0xe7b8ff);
@@ -553,7 +510,7 @@ $('pauseBtn').onclick=()=>setPause();$('resumeBtn').onclick=()=>setPause(false);
 $('winContinue').onclick=()=>{$('winOverlay').classList.add('hidden');state.paused=false};
 // Mobile controls v1.4: live layouts, analog joystick and independent multitouch actions.
 const CONTROL_STORAGE='emilys-adventures-controls-v1';
-const GAME_VERSION='1.8.0';
+const GAME_VERSION='1.8.3';
 document.documentElement.dataset.gameVersion=GAME_VERSION;
 const CONTROL_MODES=['auto','center','split','floating'];
 let gamepadConnected=false;
@@ -875,7 +832,7 @@ function update(dt){const gamepad=readGamepad();if(!state.started||state.paused|
   if(Math.abs(sx)>.25||Math.abs(sy)>.25)facing=Math.abs(sx)>Math.abs(sy)?(sx>0?'right':'left'):(sy>0?'down':'up');
  }
  if(moving){walkClock+=dt;frame=Math.floor(walkClock*7.6)%4}else{walkClock=0;frame=0}setHeroFrame(facing,frame);
- for(let i=0;i<collectibles.length;i++){const c=collectibles[i];if(!state.collected[i]){c.c.rotation.y+=dt*.9;c.c.position.y=1.03+Math.sin(time*2.5+i)*.12;c.ring.rotation.z+=dt*.25;if(state.stage>=1&&Math.hypot(state.x-c.x,state.z-c.z)<.9)collect(i)}}
+ for(let i=0;i<collectibles.length;i++){const c=collectibles[i];if(!state.collected[i]){c.c.material.rotation=Math.sin(time*1.5+i)*.055;c.c.position.y=1.03+Math.sin(time*2.5+i)*.12;c.ring.rotation.z+=dt*.25;if(state.stage>=1&&Math.hypot(state.x-c.x,state.z-c.z)<.9)collect(i)}}
  for(let e of enemies){if(!e.alive)continue;const d=Math.hypot(e.x-state.x,e.z-state.z);e.attackTimer=Math.max(0,e.attackTimer-dt);e.group.position.y=Math.sin(time*2.2+e.phase)*.095;e.group.rotation.y+=dt*.5;
  if(d<4.5&&d>1.1){const vx=(state.x-e.x)/d,vz=(state.z-e.z)/d;e.x+=vx*dt*.97;e.z+=vz*dt*.97;e.group.position.x=e.x;e.group.position.z=e.z;e.shadow.position.x=e.x;e.shadow.position.z=e.z}
  if(d<1.26&&e.attackTimer===0&&state.hitCD===0){state.hp=Math.max(0,state.hp-9);secondsSinceHit=0;regenAccumulator=0;state.hitCD=.75;e.attackTimer=1.25;pulse(state.x,state.z,0xff8298);refreshHUD();if(state.hp<=0){state.hp=100;state.x=playerStart.x;state.z=playerStart.z;state.coins=Math.max(0,state.coins-5);walkTo=null;toast('💗 Міра повернула Емілі до села. Тримайся!');refreshHUD()}else toast('💔 Дух атакував! -9 здоров’я');persist()}
@@ -916,7 +873,7 @@ function tick(now){
  if(now-fpsClock>=700){$('fpsCounter').textContent=Math.round(fpsFrames*1000/(now-fpsClock))+' FPS';fpsClock=now;fpsFrames=0}
 
  update(dt);hero.position.set(state.x,1.02+Math.sin(time*2)*(state.started?.025:.035),state.z);heroShadow.position.set(state.x,-.007,state.z);
- sage.rotation.y=Math.sin(time*.6)*.09;altarCrystal.rotation.y+=dt*.38;altarCrystal.position.y=1.42+Math.sin(time*1.8)*.14;
+ sage.position.y=Math.sin(time*1.6)*.045;altarCrystal.material.rotation=Math.sin(time*1.7)*.055;altarCrystal.position.y=1.42+Math.sin(time*1.8)*.14;
  for(let i=effects.length-1;i>=0;i--){const e=effects[i];e.age+=dt;const k=e.age/e.life;e.mesh.scale.setScalar(1+k*3.4);e.mesh.material.opacity=Math.max(0,(1-k)*.8);if(k>=1){scene.remove(e.mesh);e.mesh.geometry.dispose();e.mesh.material.dispose();effects.splice(i,1)}}
  updateMagicWaves(dt);
  cameraFollow.lerp(tmpCam.set(state.x,0,state.z),1-Math.exp(-dt*4));camera.position.set(cameraFollow.x+13.7,19,cameraFollow.z+13.7);camera.lookAt(cameraFollow.x,.0,cameraFollow.z);
