@@ -3,6 +3,33 @@
 'use strict';
 try {
 const THREE = await import('https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js');
+const GRAPHICS_STORAGE = 'emilys-adventures-graphics-v2';
+const presets = {
+  low:      {renderScale:70, shadows:'off',  fps:30, decorations:'low',    reducedEffects:true},
+  balanced: {renderScale:100,shadows:'512',fps:60, decorations:'medium', reducedEffects:false},
+  high:     {renderScale:125,shadows:'1024',fps:60, decorations:'high',   reducedEffects:false}
+};
+const clampValue=(v,a,b)=>Math.max(a,Math.min(b,v));
+function readGraphics() {
+  const touch=matchMedia('(pointer:coarse)').matches;
+  const defaultPreset=touch ? 'low' : 'balanced';
+  let previous={};try{previous=JSON.parse(localStorage.getItem(GRAPHICS_STORAGE)||'{}')||{}}catch(_){previous={}}
+  const preset=Object.hasOwn(presets,previous.preset) ? previous.preset : previous.preset==='custom' ? 'custom' : defaultPreset;
+  const fallback=presets[defaultPreset];
+  const base=preset==='custom'?fallback:presets[preset];
+  return {
+    preset,
+    renderScale:clampValue(Number(previous.renderScale) || base.renderScale,60,150),
+    shadows:['off','512','1024','2048'].includes(previous.shadows)?previous.shadows:base.shadows,
+    fps:[0,30,45,60].includes(Number(previous.fps))?Number(previous.fps):base.fps,
+    decorations:['low','medium','high'].includes(previous.decorations)?previous.decorations:base.decorations,
+    reducedEffects:typeof previous.reducedEffects==='boolean'?previous.reducedEffects:base.reducedEffects,
+    showFps:previous.showFps===true
+  };
+}
+let graphics=readGraphics();
+function storeGraphics(){try{localStorage.setItem(GRAPHICS_STORAGE,JSON.stringify(graphics))}catch(_){}}
+
 
 const $ = id=>document.getElementById(id);
 const canvas=$('gameCanvas');
@@ -27,16 +54,26 @@ function refreshHUD(){ $('hpValue').textContent=`${Math.ceil(state.hp)} / 100`;$
 refreshHUD();
 
 // Rendering and camera
-const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:false,powerPreference:'high-performance'});
-renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,1.25));renderer.setSize(window.innerWidth,window.innerHeight);
-renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;
+const renderer=new THREE.WebGLRenderer({canvas,antialias:false,alpha:false,powerPreference:'high-performance'});
+renderer.shadowMap.enabled=graphics.shadows!=='off';renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;
 renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.17;
 const scene=new THREE.Scene();scene.background=new THREE.Color(0xb8e4e0);scene.fog=new THREE.FogExp2(0xb8e4e0,.020);
 const camera=new THREE.OrthographicCamera();const cameraFollow=new THREE.Vector3(state.x,0,state.z);
-function resize(){const w=window.innerWidth,h=window.innerHeight,asp=w/h;const mobile=w<760;const vertical=mobile?(h>w?15.6:16.4):15.5;camera.left=-vertical*asp/2;camera.right=vertical*asp/2;camera.top=vertical/2;camera.bottom=-vertical/2;camera.near=.1;camera.far=150;camera.updateProjectionMatrix();renderer.setSize(w,h);renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,mobile?1.15:1.25));}
-window.addEventListener('resize',resize);resize();
+function resize(){
+ const w=Math.max(1,canvas.clientWidth),h=Math.max(1,canvas.clientHeight),asp=w/h;
+ const portrait=h>w;
+ const vertical=portrait?18.5:(h<480?15.7:15.5);
+ camera.left=-vertical*asp/2;camera.right=vertical*asp/2;camera.top=vertical/2;camera.bottom=-vertical/2;
+ camera.near=.1;camera.far=150;camera.updateProjectionMatrix();
+ // Scale is expressed relative to CSS pixels, independently of hardware DPR.
+ renderer.setPixelRatio(graphics.renderScale/100);
+ renderer.setSize(w,h,false);
+}
+window.addEventListener('resize',resize);
+window.visualViewport?.addEventListener('resize',resize);
+resize();
 scene.add(new THREE.HemisphereLight(0xcdf8ef,0x83a67d,2.3));
-const sun=new THREE.DirectionalLight(0xffebc5,2.65);sun.position.set(-10,23,12);sun.castShadow=true;sun.shadow.mapSize.set(1024,1024);sun.shadow.camera.left=-25;sun.shadow.camera.right=25;sun.shadow.camera.top=25;sun.shadow.camera.bottom=-25;sun.shadow.camera.near=.5;sun.shadow.camera.far=70;sun.shadow.bias=-.0003;scene.add(sun);
+const sun=new THREE.DirectionalLight(0xffebc5,2.65);sun.position.set(-10,23,12);sun.castShadow=true;sun.shadow.mapSize.set(graphics.shadows==='off'?512:Number(graphics.shadows),graphics.shadows==='off'?512:Number(graphics.shadows));sun.shadow.camera.left=-25;sun.shadow.camera.right=25;sun.shadow.camera.top=25;sun.shadow.camera.bottom=-25;sun.shadow.camera.near=.5;sun.shadow.camera.far=70;sun.shadow.bias=-.0003;scene.add(sun);
 const mat=(color,other={})=>new THREE.MeshStandardMaterial({color,roughness:.96,...other});
 const grass=mat(0x8fbe8b),darkGrass=mat(0x6aa47b),lightGrass=mat(0xa1cda0),pathMat=mat(0xd8c8a4),trunkMat=mat(0x846f62),leafA=mat(0x4c917f),leafB=mat(0x70af83),leafC=mat(0x80bd8a),rockMat=mat(0xa0b0a1),flowerYellow=mat(0xffdeb0,{emissive:0x5f3918,emissiveIntensity:.1}),flowerPink=mat(0xf8aeb4),blue=mat(0x8fe8f2,{emissive:0x3ab7c1,emissiveIntensity:.7});
 const add=(mesh,x,y,z,cast=false)=>{mesh.position.set(x,y,z);mesh.castShadow=cast;mesh.receiveShadow=true;scene.add(mesh);return mesh};
@@ -44,7 +81,8 @@ const ground=add(new THREE.Mesh(new THREE.PlaneGeometry(52,52),grass),0,-.08,0);
 let seed=3391;const rand=()=>((seed=(1664525*seed+1013904223)>>>0)/4294967296),between=(a,b)=>a+(b-a)*rand();
 function disk(x,z,r,color,y=.001,segments=20){const o=new THREE.Mesh(new THREE.CircleGeometry(r,segments),color);o.rotation.x=-Math.PI/2;o.position.set(x,y,z);scene.add(o);return o}
 // Ground patterns and stepping-stone paths
-for(let i=0;i<94;i++){const x=between(-23,23),z=between(-23,23);disk(x,z,between(.35,1.85),rand()>.5?lightGrass:darkGrass,-.075,9)}
+const groundDetails=[];
+for(let i=0;i<94;i++){const x=between(-23,23),z=between(-23,23);groundDetails.push(disk(x,z,between(.35,1.85),rand()>.5?lightGrass:darkGrass,-.075,9))}
 function path(a,b,width=.92){const dx=b.x-a.x,dz=b.z-a.z,len=Math.hypot(dx,dz);const m=new THREE.Mesh(new THREE.PlaneGeometry(width,len),pathMat);m.rotation.set(-Math.PI/2,0,Math.atan2(dx,dz));m.position.set((a.x+b.x)/2,-.053,(a.z+b.z)/2);scene.add(m);for(let i=0;i<Math.ceil(len/1.15);i++){const k=(i+.5)/Math.ceil(len/1.15);disk(a.x+dx*k+between(-.12,.12),a.z+dz*k+between(-.12,.12),between(.07,.16),mat(0xf0ddbb),-.045,6)}}
 path({x:-7,z:-4},{x:1,z:-1},1.35);path({x:1,z:-1},{x:2,z:-12.5},1.1);path({x:1,z:-1},{x:12,z:-7},.9);path({x:1,z:-1},{x:-13,z:9},.7);
 // A tiny pond and lilies
@@ -64,13 +102,20 @@ for(let i=0,tries=0;i<135&&tries<1000;tries++){const x=between(-23,23),z=between
 const flowerSpots=[];
 for(let i=0;i<185;i++){let x=between(-21,21),z=between(-21,21);if(Math.hypot(x+11,z+9)<3.6)continue;flowerSpots.push({x,z,pink:rand()>.49})}
 function placeInstances(mesh,spots,y,scale){const dummy=new THREE.Object3D();spots.forEach((p,i)=>{dummy.position.set(p.x,y,p.z);dummy.rotation.set(0,0,0);dummy.scale.set(...scale);dummy.updateMatrix();mesh.setMatrixAt(i,dummy.matrix)});mesh.instanceMatrix.needsUpdate=true;mesh.receiveShadow=true;scene.add(mesh)}
+const flowerDetails=[];
 const flowerStem=new THREE.InstancedMesh(new THREE.CylinderGeometry(.018,.018,.17,4),leafB,flowerSpots.length);
-placeInstances(flowerStem,flowerSpots,.052,[1,1,1]);
+placeInstances(flowerStem,flowerSpots,.052,[1,1,1]);flowerDetails.push(flowerStem);
 const flowerHeadGeometry=new THREE.SphereGeometry(.075,6,5);
-for(const [pink,color] of [[true,flowerPink],[false,flowerYellow]]){const spots=flowerSpots.filter(p=>p.pink===pink);if(!spots.length)continue;const heads=new THREE.InstancedMesh(flowerHeadGeometry,color,spots.length);placeInstances(heads,spots,.13,[1,.8,1])}
+for(const [pink,color] of [[true,flowerPink],[false,flowerYellow]]){const spots=flowerSpots.filter(p=>p.pink===pink);if(!spots.length)continue;const heads=new THREE.InstancedMesh(flowerHeadGeometry,color,spots.length);placeInstances(heads,spots,.13,[1,.8,1]);flowerDetails.push(heads)}
 const rockInstances=new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1,0),rockMat,68),rockDummy=new THREE.Object3D();let rockCount=0;
 for(let i=0;i<68;i++){let x=between(-22,22),z=between(-22,22);if(clearings.some(p=>Math.hypot(x-p.x,z-p.z)<p.r*.6))continue;const r=between(.1,.37);rockDummy.position.set(x,.065,z);rockDummy.rotation.set(0,rand()*5,0);rockDummy.scale.set(r,r*.58,r*.78);rockDummy.updateMatrix();rockInstances.setMatrixAt(rockCount++,rockDummy.matrix)}
 rockInstances.count=rockCount;rockInstances.instanceMatrix.needsUpdate=true;rockInstances.receiveShadow=true;scene.add(rockInstances);
+function setDecorations(level){
+ const all=level==='high',medium=level==='medium';
+ flowerDetails.forEach(o=>{o.visible=all||medium});
+ rockInstances.visible=all;
+ groundDetails.forEach((o,i)=>{o.visible=all||(medium&&i%2===0)});
+}
 // House and village landmarks
 function house(x,z){const walls=add(new THREE.Mesh(new THREE.BoxGeometry(3.1,2.25,2.7),mat(0xe5cca6)),x,1.05,z,true);
  const roof=add(new THREE.Mesh(new THREE.ConeGeometry(2.55,1.55,4),mat(0x9a7667)),x,2.85,z,true);roof.rotation.y=Math.PI/4;
@@ -122,15 +167,15 @@ const enemies=[{x:6.6,z:8},{x:-9.8,z:3},{x:14.6,z:5},{x:-10.7,z:-13}].map((p,ind
 const effects=[];
 function pulse(x,z,color=0xffe0a0){const mesh=new THREE.Mesh(new THREE.RingGeometry(.3,.4,32),new THREE.MeshBasicMaterial({color,transparent:true,opacity:.85,side:THREE.DoubleSide,depthWrite:false}));mesh.rotation.x=-Math.PI/2;mesh.position.set(x,.13,z);scene.add(mesh);effects.push({mesh,life:.56,age:0});}
 function collect(i){if(state.collected[i]||state.stage===0)return;state.collected[i]=true;collectibles[i].group.visible=false;collectibles[i].label.visible=false;pulse(crystalsAt[i].x,crystalsAt[i].z,0xeaffd2);toast('💎 Знайдено: '+crystalsAt[i].name+'!');if(countGems()===3){state.stage=2;toast('✨ Усі кристали зібрано! Прямуй до вівтаря на півдні.')}refreshHUD();persist()}
-function heal(){if(!state.started||state.paused||state.inDialogue||state.bagOpen)return;if(state.potions<=0){toast('🧪 Зілля закінчилися');return}if(state.hp>=100){toast('❤️ Здоров’я вже повне');return}state.potions--;state.hp=Math.min(100,state.hp+40);pulse(state.x,state.z,0x83eec2);toast('❤️ Відновлено 40 здоров’я');refreshHUD();persist()}
-function attack(){if(!state.started||state.paused||state.inDialogue||state.bagOpen||state.attackCD>0)return;state.attackCD=.48;pulse(state.x,state.z,0xfbd69e);let hit=0;for(const e of enemies){if(!e.alive||Math.hypot(e.x-state.x,e.z-state.z)>2.35)continue;e.hp--;hit++;e.body.material.emissive=new THREE.Color(0xbb8899);if(e.hp<=0){e.alive=false;e.group.visible=false;e.shadow.visible=false;state.coins+=5;state.kills++;pulse(e.x,e.z,0xe7b8ff);toast('⚔️ Дух переможений! +5 монет');refreshHUD();persist()}}
+function heal(){if(!state.started||state.paused||state.inDialogue||state.bagOpen||settingsOpen)return;if(state.potions<=0){toast('🧪 Зілля закінчилися');return}if(state.hp>=100){toast('❤️ Здоров’я вже повне');return}state.potions--;state.hp=Math.min(100,state.hp+40);pulse(state.x,state.z,0x83eec2);toast('❤️ Відновлено 40 здоров’я');refreshHUD();persist()}
+function attack(){if(!state.started||state.paused||state.inDialogue||state.bagOpen||settingsOpen||state.attackCD>0)return;state.attackCD=.48;pulse(state.x,state.z,0xfbd69e);let hit=0;for(const e of enemies){if(!e.alive||Math.hypot(e.x-state.x,e.z-state.z)>2.35)continue;e.hp--;hit++;e.body.material.emissive=new THREE.Color(0xbb8899);if(e.hp<=0){e.alive=false;e.group.visible=false;e.shadow.visible=false;state.coins+=5;state.kills++;pulse(e.x,e.z,0xe7b8ff);toast('⚔️ Дух переможений! +5 монет');refreshHUD();persist()}}
  if(!hit)toast('⚔️ Замах! Духи надто далеко.')}
 function dialogue(name,face,lines,onClose){state.inDialogue=true;$('dialogueSpeaker').textContent=name;$('dialogueFace').textContent=face;const el=$('dialogue');el.classList.remove('hidden');let i=0;
  const draw=()=>{$('dialogueLine').textContent=lines[i];$('nextDialogue').textContent=i===lines.length-1?'Зрозуміло ✓':'Далі ›'};draw();
  $('nextDialogue').onclick=()=>{if(i<lines.length-1){i++;draw()}else{el.classList.add('hidden');state.inDialogue=false;onClose?.()}};
 }
 function nearObject(){const opts=[{type:'sage',x:sageAt.x,z:sageAt.z,r:2.35,label:'Поговорити з Мірою'},{type:'altar',x:shrineAt.x,z:shrineAt.z,r:2.5,label:'Доторкнутися до вівтаря'},...crystalsAt.map((p,i)=>({type:'crystal',i,x:p.x,z:p.z,r:1.7,label:'Взяти '+p.name.toLowerCase()})).filter(x=>!state.collected[x.i])];let found=null,dist=Infinity;for(let o of opts){let d=Math.hypot(o.x-state.x,o.z-state.z);if(d<o.r&&d<dist){dist=d;found=o}}return found}
-function interact(){if(!state.started||state.paused||state.inDialogue||state.bagOpen)return;const near=nearObject();if(!near){toast('✦ Підійди ближче до когось або чогось цікавого');return}
+function interact(){if(!state.started||state.paused||state.inDialogue||state.bagOpen||settingsOpen)return;const near=nearObject();if(!near){toast('✦ Підійди ближче до когось або чогось цікавого');return}
  if(near.type==='sage'){
   if(state.stage===0)dialogue('Міра · хранителька','🦉',['Вітаю, Емілі! Наш зоряний ліс поступово втрачає чарівне світло.','Три зоряні кристали розсіялися далеко серед дерев. Лише сміливе серце здатне повернути їх.','Знайди всі три кристали та віднеси їх до стародавнього вівтаря на півдні. Остерігайся тіньових духів!'],()=>{state.stage=1;refreshHUD();persist();toast('📜 Нове завдання: знайти 3 зоряні кристали')});
   else dialogue('Міра · хранителька','🦉',state.stage===3?['Ти зробила це, маленька героїне! Тепер зорі освітлюватимуть наш ліс.']:['Кристали відчувають твою доброту. Поглядай на мінімапу, щоб не загубитися.','Якщо духи тебе поранять, випий зілля здоров’я клавішею Q.']);
@@ -141,9 +186,74 @@ function interact(){if(!state.started||state.paused||state.inDialogue||state.bag
   else toast('✧ Вівтар чекає, доки знайдеш усі три кристали')
  }
 }
-function bag(){if(!state.started||state.inDialogue||state.paused)return;state.bagOpen=true;refreshHUD();$('inventoryOverlay').classList.remove('hidden')}
+function bag(){if(!state.started||state.inDialogue||state.paused||settingsOpen)return;state.bagOpen=true;refreshHUD();$('inventoryOverlay').classList.remove('hidden')}
 function closeBag(){$('inventoryOverlay').classList.add('hidden');state.bagOpen=false}
-function setPause(force){if(!state.started||state.inDialogue||state.bagOpen)return;state.paused=typeof force==='boolean'?force:!state.paused;$('pauseOverlay').classList.toggle('hidden',!state.paused);persist()}
+function setPause(force){if(!state.started||state.inDialogue||state.bagOpen||settingsOpen)return;state.paused=typeof force==='boolean'?force:!state.paused;$('pauseOverlay').classList.toggle('hidden',!state.paused);persist()}
+// Graphics settings can be changed live; gameplay progress is stored separately.
+let settingsOpen=false;
+const controls={preset:$('qualityPreset'),scale:$('renderScale'),shadows:$('shadowQuality'),fps:$('frameLimit'),decorations:$('decorationQuality'),effects:$('reduceEffects'),meter:$('showFps')};
+function applyGraphics(){
+ renderer.shadowMap.enabled=graphics.shadows!=='off';
+ if(graphics.shadows!=='off'){
+  const size=Number(graphics.shadows);
+  if(sun.shadow.mapSize.x!==size){
+   sun.shadow.mapSize.set(size,size);
+   sun.shadow.map?.dispose();sun.shadow.map=null;
+  }
+ }
+ sun.castShadow=graphics.shadows!=='off';
+ renderer.shadowMap.needsUpdate=true;
+ setDecorations(graphics.decorations);
+ document.documentElement.classList.toggle('reduced-effects',graphics.reducedEffects);
+ $('fpsCounter').classList.toggle('visible',graphics.showFps);
+ resize();
+}
+function syncSettings(){
+ controls.preset.value=graphics.preset;
+ controls.scale.value=String(graphics.renderScale);
+ $('renderScaleValue').textContent=graphics.renderScale+'%';
+ controls.shadows.value=graphics.shadows;
+ controls.fps.value=String(graphics.fps);
+ controls.decorations.value=graphics.decorations;
+ controls.effects.checked=graphics.reducedEffects;
+ controls.meter.checked=graphics.showFps;
+}
+function setGraphics(next){graphics={...graphics,...next};storeGraphics();syncSettings();applyGraphics()}
+controls.preset.addEventListener('change',()=>{
+ const preset=controls.preset.value;
+ if(!Object.hasOwn(presets,preset))return;
+ setGraphics({...presets[preset],preset});
+});
+controls.scale.addEventListener('input',()=>setGraphics({preset:'custom',renderScale:Number(controls.scale.value)}));
+controls.shadows.addEventListener('change',()=>setGraphics({preset:'custom',shadows:controls.shadows.value}));
+controls.fps.addEventListener('change',()=>setGraphics({preset:'custom',fps:Number(controls.fps.value)}));
+controls.decorations.addEventListener('change',()=>setGraphics({preset:'custom',decorations:controls.decorations.value}));
+controls.effects.addEventListener('change',()=>setGraphics({preset:'custom',reducedEffects:controls.effects.checked}));
+controls.meter.addEventListener('change',()=>setGraphics({showFps:controls.meter.checked}));
+function openSettings(){
+ if(settingsOpen||state.inDialogue)return;
+ settingsOpen=true;
+ $('settingsOverlay').classList.remove('hidden');syncSettings();
+ $('closeSettingsBtn').focus();
+}
+function closeSettings(){settingsOpen=false;$('settingsOverlay').classList.add('hidden');$('settingsBtn').focus()}
+$('settingsBtn').addEventListener('click',openSettings);
+$('pauseSettingsBtn').addEventListener('click',openSettings);
+$('closeSettingsBtn').addEventListener('click',closeSettings);
+$('applySettingsBtn').addEventListener('click',closeSettings);
+$('settingsOverlay').addEventListener('pointerdown',e=>{if(e.target===$('settingsOverlay'))closeSettings()});
+applyGraphics();syncSettings();
+// Mobile quest/map panels take turns occupying the same popover space.
+function toggleMobilePanel(panel){
+ const show= !document.body.classList.contains('show-'+panel);
+ for(const section of ['quest','map'])document.body.classList.remove('show-'+section);
+ if(show)document.body.classList.add('show-'+panel);
+ $('questToggle').setAttribute('aria-expanded',String(show&&panel==='quest'));
+ $('mapToggle').setAttribute('aria-expanded',String(show&&panel==='map'));
+}
+$('questToggle').onclick=()=>toggleMobilePanel('quest');
+$('mapToggle').onclick=()=>toggleMobilePanel('map');
+function collapsePanels(){document.body.classList.remove('show-quest','show-map');$('questToggle').setAttribute('aria-expanded','false');$('mapToggle').setAttribute('aria-expanded','false')}
 function reset(){try{localStorage.removeItem(STORAGE)}catch(_){ }window.location.reload()}
 $('startBtn').textContent=saved?'Продовжити пригоду ✨':'Розпочати пригоду ✨';$('startBtn').addEventListener('click',()=>{state.started=true;$('startOverlay').classList.add('hidden');toast(state.stage===0?'🌿 Знайди Міру біля села':'✨ З поверненням у Зоряний ліс!')});
 $('interactBtn').onclick=interact;$('attackBtn').onclick=attack;$('healBtn').onclick=heal;$('inventoryBtn').onclick=bag;
@@ -151,16 +261,16 @@ $('mInteract').onclick=interact;$('mAttack').onclick=attack;$('mHeal').onclick=h
 $('pauseBtn').onclick=()=>setPause();$('resumeBtn').onclick=()=>setPause(false);$('restartBtn').onclick=reset;$('closeBagBtn').onclick=closeBag;$('winRestart').onclick=reset;
 $('winContinue').onclick=()=>{$('winOverlay').classList.add('hidden');state.paused=false};
 const pressed=new Set();const arrowKeys=new Set(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space']);
-window.addEventListener('keydown',e=>{if(arrowKeys.has(e.code))e.preventDefault();pressed.add(e.code);if(e.repeat)return;if(e.code==='Escape'){if(state.bagOpen)closeBag();else if(state.inDialogue)$('nextDialogue').click();else setPause();}else if(e.code==='KeyE')interact();else if(e.code==='Space')attack();else if(e.code==='KeyQ')heal();else if(e.code==='KeyI'){if(state.bagOpen)closeBag();else bag()}});
-window.addEventListener('keyup',e=>pressed.delete(e.code));window.addEventListener('blur',()=>pressed.clear());
+window.addEventListener('keydown',e=>{if(settingsOpen){if(e.code==='Escape'){e.preventDefault();closeSettings()}return}if(arrowKeys.has(e.code))e.preventDefault();pressed.add(e.code);if(e.repeat)return;if(e.code==='Escape'){if(settingsOpen)closeSettings();else if(state.bagOpen)closeBag();else if(state.inDialogue)$('nextDialogue').click();else setPause();}else if(e.code==='KeyE')interact();else if(e.code==='Space')attack();else if(e.code==='KeyQ')heal();else if(e.code==='KeyI'){if(state.bagOpen)closeBag();else bag()}});
+window.addEventListener('keyup',e=>pressed.delete(e.code));window.addEventListener('blur',()=>{pressed.clear();last=performance.now()});document.addEventListener('visibilitychange',()=>{if(!document.hidden)last=performance.now()});
 for(const btn of document.querySelectorAll('[data-move]')){const code=btn.dataset.move;btn.addEventListener('pointerdown',e=>{e.preventDefault();btn.setPointerCapture(e.pointerId);pressed.add(code)});for(const evt of ['pointerup','pointercancel','lostpointercapture'])btn.addEventListener(evt,()=>pressed.delete(code))}
 // Tapping the landscape establishes a walk destination (useful on phones).
 const raycaster=new THREE.Raycaster(),ndc=new THREE.Vector2(),plane=new THREE.Plane(new THREE.Vector3(0,1,0),0);let walkTo=null;
-canvas.addEventListener('pointerdown',e=>{if(!state.started||state.paused||state.inDialogue||state.bagOpen)return;const r=canvas.getBoundingClientRect();ndc.x=((e.clientX-r.left)/r.width)*2-1;ndc.y=-((e.clientY-r.top)/r.height)*2+1;raycaster.setFromCamera(ndc,camera);const point=new THREE.Vector3();if(raycaster.ray.intersectPlane(plane,point)){walkTo={x:THREE.MathUtils.clamp(point.x,-SCENE_RADIUS,SCENE_RADIUS),z:THREE.MathUtils.clamp(point.z,-SCENE_RADIUS,SCENE_RADIUS)}}});
-let last=performance.now(),time=0,miniClock=0,saveClock=0;const tmpCam=new THREE.Vector3();
+canvas.addEventListener('pointerdown',e=>{if(!state.started||state.paused||state.inDialogue||state.bagOpen||settingsOpen)return;collapsePanels();const r=canvas.getBoundingClientRect();ndc.x=((e.clientX-r.left)/r.width)*2-1;ndc.y=-((e.clientY-r.top)/r.height)*2+1;raycaster.setFromCamera(ndc,camera);const point=new THREE.Vector3();if(raycaster.ray.intersectPlane(plane,point)){walkTo={x:THREE.MathUtils.clamp(point.x,-SCENE_RADIUS,SCENE_RADIUS),z:THREE.MathUtils.clamp(point.z,-SCENE_RADIUS,SCENE_RADIUS)}}});
+let last=performance.now(),time=0,miniClock=0,saveClock=0,fpsClock=performance.now(),fpsFrames=0;const tmpCam=new THREE.Vector3();
 function canStand(x,z){if(Math.abs(x)>SCENE_RADIUS||Math.abs(z)>SCENE_RADIUS)return false;return solids.every(o=>Math.hypot(o.x-x,o.z-z)>o.r+.26)}
 function move(dx,dz){const nx=state.x+dx,nz=state.z+dz;if(canStand(nx,nz)){state.x=nx;state.z=nz;return}if(canStand(nx,state.z))state.x=nx;else if(canStand(state.x,nz))state.z=nz}
-function update(dt){if(!state.started||state.paused||state.inDialogue||state.bagOpen)return;
+function update(dt){if(!state.started||state.paused||state.inDialogue||state.bagOpen||settingsOpen)return;
  state.attackCD=Math.max(0,state.attackCD-dt);state.hitCD=Math.max(0,state.hitCD-dt);
  let sx=(pressed.has('KeyD')||pressed.has('ArrowRight')?1:0)-(pressed.has('KeyA')||pressed.has('ArrowLeft')?1:0),sy=(pressed.has('KeyS')||pressed.has('ArrowDown')?1:0)-(pressed.has('KeyW')||pressed.has('ArrowUp')?1:0);
  if(sx||sy)walkTo=null;
@@ -189,7 +299,14 @@ function updateMinimap(){const c=$('minimap'),g=c.getContext('2d'),w=c.width,h=c
  let [px,py]=xy(state.x,state.z);g.fillStyle='#ffffff';g.beginPath();g.arc(px,py,6.1,0,Math.PI*2);g.fill();g.fillStyle='#e7a5a0';g.beginPath();g.arc(px,py,3.2,0,Math.PI*2);g.fill();
  g.strokeStyle='#eaf7dd5e';g.strokeRect(1,1,w-2,h-2)
 }
-function tick(now){requestAnimationFrame(tick);const dt=Math.min((now-last)/1000,.05);last=now;time+=dt;
+function tick(now){
+ requestAnimationFrame(tick);
+ const elapsed=now-last, interval=graphics.fps?1000/graphics.fps:0;
+ if(interval&&elapsed<interval-1)return;
+ const dt=Math.min(elapsed/1000,.05);last=now;time+=dt;
+ fpsFrames++;
+ if(now-fpsClock>=700){$('fpsCounter').textContent=Math.round(fpsFrames*1000/(now-fpsClock))+' FPS';fpsClock=now;fpsFrames=0}
+
  update(dt);hero.position.set(state.x,1.02+Math.sin(time*2)*(state.started?.025:.035),state.z);heroShadow.position.set(state.x,-.007,state.z);
  sage.rotation.y=Math.sin(time*.6)*.09;altarCrystal.rotation.y+=dt*.38;altarCrystal.position.y=1.42+Math.sin(time*1.8)*.14;
  for(let i=effects.length-1;i>=0;i--){const e=effects[i];e.age+=dt;const k=e.age/e.life;e.mesh.scale.setScalar(1+k*3.4);e.mesh.material.opacity=Math.max(0,(1-k)*.8);if(k>=1){scene.remove(e.mesh);e.mesh.geometry.dispose();e.mesh.material.dispose();effects.splice(i,1)}}

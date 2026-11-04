@@ -2,7 +2,7 @@
 <html lang="uk">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#172b33">
 <title>Emily's Adventures | Таємниця зоряного лісу</title>
 <link rel="stylesheet" href="src/styles.css">
@@ -10,18 +10,42 @@
 <body>
 <div id="game">
   <canvas id="gameCanvas" aria-label="Тривимірний казковий світ Emily's Adventures"></canvas>
-  <div class="hud topbar"><div class="brand glass"><span class="logoMark">✦</span><div class="brandText">Emily's <b>Adventures</b></div></div><button class="iconbtn" id="pauseBtn" title="Пауза">☰</button></div>
+  <div class="hud topbar">
+    <div class="brand glass"><span class="logoMark">✦</span><div class="brandText">Emily's <b>Adventures</b></div></div>
+    <div class="topbarActions">
+      <button class="iconbtn mobileTool" id="questToggle" title="Показати завдання" aria-expanded="false" aria-controls="questPanel">📜</button>
+      <button class="iconbtn mobileTool" id="mapToggle" title="Показати мінімапу" aria-expanded="false" aria-controls="mapPanel">🗺️</button>
+      <button class="iconbtn" id="settingsBtn" title="Налаштування графіки" aria-label="Налаштування графіки">⚙️</button>
+      <button class="iconbtn" id="pauseBtn" title="Пауза">☰</button>
+    </div>
+  </div>
   <div class="stats glass"><div class="statrow"><span>❤️ Здоров'я</span><span id="hpValue">100 / 100</span></div><div class="bar"><i id="hpBar"></i></div><div class="statpills"><div class="statpill">🪙 <span id="coinValue">0</span></div><div class="statpill">💎 <span id="gemValue">0 / 3</span></div><div class="statpill">🧪 <span id="potionValue">2</span></div></div></div>
-  <div class="hud side"><section class="quest glass"><div class="eyebrow">✧ Головне завдання</div><h3 id="questTitle">Початок пригоди</h3><p id="questDesc">Поговори з хранителькою Мірою біля села.</p><div class="questFooter"><span id="questProgress">ПОШУК ПРИГОДИ</span><span class="questDots" id="questDots"><i></i><i></i><i></i></span></div></section><section class="mapwrap glass"><canvas id="minimap" width="180" height="180" aria-label="Мінімапа"></canvas><span class="maplegend">✦ ЗОРЯНИЙ ЛІС</span></section></div>
+  <div class="hud side"><section class="quest glass" id="questPanel"><div class="eyebrow">✧ Головне завдання</div><h3 id="questTitle">Початок пригоди</h3><p id="questDesc">Поговори з хранителькою Мірою біля села.</p><div class="questFooter"><span id="questProgress">ПОШУК ПРИГОДИ</span><span class="questDots" id="questDots"><i></i><i></i><i></i></span></div></section><section class="mapwrap glass" id="mapPanel"><canvas id="minimap" width="180" height="180" aria-label="Мінімапа"></canvas><span class="maplegend">✦ ЗОРЯНИЙ ЛІС</span></section></div>
   <div id="toast" role="status"></div>
+  <div id="fpsCounter" aria-live="off" aria-label="Частота кадрів"></div>
   <div id="nearPrompt" class="glass"><span class="key">E</span><span id="nearText">Взаємодія</span></div>
   <div id="bottomHUD" class="glass"><button class="skill mint" id="interactBtn" title="Взаємодія (E)">✦<small>E · дія</small></button><div class="divider"></div><button class="skill gold" id="attackBtn" title="Атака (пробіл)">⚔️<small>Пробіл</small></button><button class="skill" id="healBtn" title="Зілля здоров'я (Q)">🧪<small>Q · зілля</small></button><div class="divider"></div><button class="skill" id="inventoryBtn" title="Рюкзак (I)">🎒<small>I · рюкзак</small></button></div>
   <div class="help"><strong>W A S D</strong> або <strong>↑ ← ↓ →</strong> рух&nbsp;&nbsp; <strong>E</strong> дія&nbsp;&nbsp; <strong>Пробіл</strong> атака&nbsp;&nbsp; <strong>Q</strong> зілля&nbsp;&nbsp; <strong>I</strong> рюкзак</div>
-  <div class="mobilePad" id="mobilePad"><button class="pad up" data-move="ArrowUp">↑</button><button class="pad left" data-move="ArrowLeft">←</button><button class="pad right" data-move="ArrowRight">→</button><button class="pad down" data-move="ArrowDown">↓</button></div>
+  <div class="mobilePad" id="mobilePad" role="group" aria-label="Рух персонажа"><button class="pad up" data-move="ArrowUp">↑</button><button class="pad left" data-move="ArrowLeft">←</button><button class="pad right" data-move="ArrowRight">→</button><button class="pad down" data-move="ArrowDown">↓</button></div>
   <div class="mobileBtns"><button id="mInteract" class="mobileBtn">✦ Дія</button><button id="mAttack" class="mobileBtn attack">⚔ Удар</button><button id="mHeal" class="mobileBtn">🧪 Зілля</button><button id="mBag" class="mobileBtn">🎒 Рюкзак</button></div>
   <div id="dialogue" class="hidden" role="dialog" aria-modal="true"><div class="face" id="dialogueFace">🦉</div><div class="dialogueText"><div class="speaker" id="dialogueSpeaker">Міра</div><p id="dialogueLine"></p></div><button class="dialogueBtn" id="nextDialogue">Далі ›</button></div>
   <div class="overlay" id="startOverlay"><div class="intro"><div class="introCopy"><div class="tag">✧ Казкова RPG-пригода</div><h1>Emily's<br><em>Adventures</em></h1><p>Десь серед шепоту старих дерев згасають три зоряні кристали. Маленька Емілі вирушає в ліс, де на неї чекають дивовижні зустрічі, таємниці й хоробрість.</p><button class="primary" id="startBtn">Розпочати пригоду ✨</button><div class="footnote">THREE.JS · ЗРОБЛЕНО З ЛЮБОВ'Ю ДО ПРИГОД</div></div><div class="introPic"><div class="moon"></div><img id="introPortrait" alt="Піксельна Емілі" src="assets/hero/emily-portrait.png"></div></div></div>
-  <div class="overlay hidden" id="pauseOverlay"><div class="smallModal"><div style="font-size:39px">🌙</div><h2>Маленька перерва</h2><p>Зоряний ліс нікуди не втече. А прогрес зберігається автоматично в цьому браузері.</p><div class="actions"><button class="primary" id="resumeBtn">Продовжити ✨</button><button class="secondary" id="restartBtn">Почати спочатку</button></div></div></div>
+  <div class="overlay hidden" id="settingsOverlay" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="settingsModal">
+      <div class="settingsHeader"><div><span class="settingsKicker">⚙️ ПАРАМЕТРИ ГРИ</span><h2 id="settingsTitle">Налаштування графіки</h2><p>Підбери комфортну плавність для свого пристрою. Зміни застосовуються одразу.</p></div><button class="settingsClose" id="closeSettingsBtn" aria-label="Закрити налаштування">✕</button></div>
+      <div class="settingsBody">
+        <div class="settingRow"><label for="qualityPreset">Профіль якості <small>Швидке перемикання налаштувань</small></label><select id="qualityPreset"><option value="low">🌱 Економний</option><option value="balanced">🌿 Збалансований</option><option value="high">✨ Високий</option><option value="custom">🛠️ Власний</option></select></div>
+        <div class="settingRow"><label for="renderScale">Роздільність 3D <small>Найсильніше впливає на GPU</small></label><div class="rangeControl"><input id="renderScale" type="range" min="60" max="150" step="10" value="100"><output for="renderScale" id="renderScaleValue">100%</output></div></div>
+        <div class="settingRow"><label for="shadowQuality">Тіні <small>Вимкнення допомагає слабким GPU</small></label><select id="shadowQuality"><option value="off">Вимкнено</option><option value="512">Низькі · 512</option><option value="1024">Середні · 1024</option><option value="2048">Високі · 2048</option></select></div>
+        <div class="settingRow"><label for="frameLimit">Максимальна частота кадрів <small>Менше FPS = менше нагрівання</small></label><select id="frameLimit"><option value="30">30 FPS</option><option value="45">45 FPS</option><option value="60">60 FPS</option><option value="0">Без обмеження</option></select></div>
+        <div class="settingRow"><label for="decorationQuality">Деталі світу <small>Квіти, дрібні камені, візерунки трави</small></label><select id="decorationQuality"><option value="low">Мінімум</option><option value="medium">Середньо</option><option value="high">Усе</option></select></div>
+        <label class="settingCheck"><input id="reduceEffects" type="checkbox"><span>Спростити ефекти інтерфейсу <small>Без розмиття напівпрозорих панелей</small></span></label>
+        <label class="settingCheck"><input id="showFps" type="checkbox"><span>Показувати FPS <small>Орієнтовна частота промальовування сцени</small></span></label>
+      </div>
+      <div class="settingsFooter"><span>💾 Зберігається окремо від проходження гри</span><button class="primary" id="applySettingsBtn">Готово ✓</button></div>
+    </div>
+  </div>
+  <div class="overlay hidden" id="pauseOverlay"><div class="smallModal"><div style="font-size:39px">🌙</div><h2>Маленька перерва</h2><p>Зоряний ліс нікуди не втече. А прогрес зберігається автоматично в цьому браузері.</p><div class="actions"><button class="secondary" id="pauseSettingsBtn">⚙️ Графіка</button><button class="primary" id="resumeBtn">Продовжити ✨</button><button class="secondary" id="restartBtn">Почати спочатку</button></div></div></div>
   <div class="overlay hidden" id="inventoryOverlay"><div class="smallModal"><div style="font-size:39px">🎒</div><h2>Рюкзак Емілі</h2><p id="inventoryContents">💎 Зоряні кристали: 0/3</p><div class="actions"><button class="primary" id="closeBagBtn">Назад до пригоди</button></div></div></div>
   <div class="overlay hidden" id="winOverlay"><div class="smallModal"><div style="font-size:46px">🌟</div><h2>Ліс знову сяє!</h2><p>Емілі повернула зоряне світло до стародавнього вівтаря. Це кінець першого розділу, але початок великої історії. Дякуємо за пригоду!</p><div class="actions"><button class="primary" id="winContinue">Ще погуляти 🌿</button><button class="secondary" id="winRestart">Нова пригода</button></div></div></div>
   <div id="fatal">Не вдалося завантажити Three.js. Для запуску гри потрібен інтернет, оскільки 3D-рушій завантажується з CDN. Перевір з'єднання та перезавантаж сторінку.</div>
