@@ -247,3 +247,42 @@ body.editing-controls .mobileActions:active{cursor:grabbing}
  #dialogue{bottom:calc(6px + env(safe-area-inset-bottom));max-width:calc(100% - 18px)}
  #fpsCounter{bottom:4px}
 }
+
+/* v1.4.1 fixes: selection feedback and right-edge dock */
+.settingsKicker .gameVersion{display:inline-block;vertical-align:baseline;margin-left:9px;padding:3px 7px;border-radius:7px;border:1px solid rgba(196,239,225,.25);color:#bbdfd4;font:700 10px/1.1 'Manrope',system-ui,sans-serif;letter-spacing:.05em;text-transform:none;background:rgba(255,255,255,.055)}
+/* The right-most action button now sits at the screen edge (except the notch safe area). */
+body[data-control-layout="floating"] .mobileActions:not(.custom-dock),
+body[data-control-layout="split"] .mobileActions{right:max(2px,env(safe-area-inset-right));left:auto;transform:none}
+#controlLayoutHint{line-height:1.55}
+
+/* v1.4.1 HUD ergonomics: keep the world clear, reserve the top-left for HP.
+   The brand remains on the title screen, not in the game HUD. */
+.topbar{left:auto;right:22px;width:auto;justify-content:flex-end}
+.stats{top:20px;left:22px}
+#fpsCounter{left:auto;right:20px;bottom:20px;transform:none}
+/* On mobile with a right-side action dock, move FPS above the dock. */
+/* The free-layout action dock hugs the right safe edge unless repositioned by the player. */
+body[data-control-layout="floating"] .mobileActions:not(.custom-dock){right:max(4px,env(safe-area-inset-right));left:auto;transform:none}
+
+@media(max-width:900px),(pointer:coarse){
+ .topbar{top:calc(8px + env(safe-area-inset-top));right:8px;left:auto;width:auto;justify-content:flex-end}
+ .stats{top:calc(8px + env(safe-area-inset-top));left:8px;width:174px}
+ #fpsCounter{left:auto;right:8px;bottom:calc(10px + env(safe-area-inset-bottom));transform:none}
+ body[data-control-layout="split"] #fpsCounter,
+ body[data-control-layout="floating"] #fpsCounter{bottom:calc(188px + env(safe-area-inset-bottom))}
+ .side .quest,.side .mapwrap{top:calc(105px + env(safe-area-inset-top))}
+}
+@media(max-width:360px){
+ .stats{width:146px;padding:8px 9px}
+ .statrow{font-size:10px;gap:3px}
+ .statpill{font-size:9px;padding:4px}
+ .topbarActions{gap:2px}
+ .iconbtn{min-width:35px;width:35px;height:35px}
+}
+@media(max-height:540px) and (orientation:landscape){
+ .stats{top:calc(8px + env(safe-area-inset-top));left:8px}
+ #fpsCounter{right:8px;bottom:calc(8px + env(safe-area-inset-bottom));left:auto;transform:none}
+ body[data-control-layout="split"] #fpsCounter,
+ body[data-control-layout="floating"] #fpsCounter{bottom:calc(154px + env(safe-area-inset-bottom))}
+ .side .quest,.side .mapwrap{top:calc(58px + env(safe-area-inset-top));left:auto;right:8px}
+}

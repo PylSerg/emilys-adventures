@@ -275,6 +275,8 @@ $('pauseBtn').onclick=()=>setPause();$('resumeBtn').onclick=()=>setPause(false);
 $('winContinue').onclick=()=>{$('winOverlay').classList.add('hidden');state.paused=false};
 // Mobile controls v1.4: live layouts, analog joystick and independent multitouch actions.
 const CONTROL_STORAGE='emilys-adventures-controls-v1';
+const GAME_VERSION='1.4.1';
+document.documentElement.dataset.gameVersion=GAME_VERSION;
 const CONTROL_MODES=['auto','center','split','floating'];
 let controlPrefs={mode:'auto',dock:null};
 try{
@@ -325,14 +327,20 @@ function applyControlLayout(){
  }
  document.body.dataset.controlLayout=layout;
  $('controlLayout').value=controlPrefs.mode;
+ const layoutTitles={center:'🎯 Центр + дуга',split:'👐 Два великі пальці',floating:'🕹️ Вільний джойстик'};
+ $('controlLayoutHint').textContent=`Зараз: ${layoutTitles[layout]}. ${controlPrefs.mode==='auto'?'Автоматичний вибір за орієнтацією екрана.':'Ручний вибір збережено.'}`;
  $('editControlsRow').hidden=layout!=='floating';
  if(editControlsMode&&layout!=='floating')finishControlsEdit();
  applyDock();
 }
-$('controlLayout').addEventListener('change',e=>{
- controlPrefs.mode=CONTROL_MODES.includes(e.target.value)?e.target.value:'auto';
+function onControlLayoutChange(e){
+ const mode=CONTROL_MODES.includes(e.target.value)?e.target.value:'auto';
+ if(controlPrefs.mode===mode){applyControlLayout();return}
+ controlPrefs.mode=mode;
  saveControlPrefs();applyControlLayout();
-});
+}
+$('controlLayout').addEventListener('change',onControlLayoutChange);
+$('controlLayout').addEventListener('input',onControlLayoutChange);
 // Rotating a phone changes auto mode immediately. Explicit choices remain unchanged.
 window.addEventListener('resize',applyControlLayout);
 window.visualViewport?.addEventListener('resize',applyControlLayout);
