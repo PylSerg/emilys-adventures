@@ -188,15 +188,15 @@ html,body{height:100%;height:100dvh}
 .mobileJoystick{z-index:2}.mobileActions{z-index:3}
 /* Split: joystick under the left thumb, actions under the right thumb. */
 body[data-control-layout="split"] .mobileJoystick{left:calc(16px + env(safe-area-inset-left));bottom:calc(15px + env(safe-area-inset-bottom));transform:none}
-body[data-control-layout="split"] .mobileActions,
+body[data-control-layout="split"] .mobileActions{left:auto;right:calc(13px + env(safe-area-inset-right));bottom:calc(16px + env(safe-area-inset-bottom));transform:none;width:174px;height:174px}
+body[data-control-layout="split"] .action-interact{left:0;top:56px}
+body[data-control-layout="split"] .action-heal{left:56px;top:0}
+body[data-control-layout="split"] .action-attack{right:0;top:54px;background:linear-gradient(180deg,rgba(166,69,84,.98),rgba(111,33,44,.98));border-color:rgba(255,205,208,.65);width:66px;height:66px}
+body[data-control-layout="split"] .action-bag{left:56px;bottom:0}
 body[data-control-layout="floating"] .mobileActions{left:auto;right:calc(13px + env(safe-area-inset-right));bottom:calc(16px + env(safe-area-inset-bottom));transform:none;width:166px;height:154px}
-body[data-control-layout="split"] .action-interact,
 body[data-control-layout="floating"] .action-interact{left:3px;bottom:46px}
-body[data-control-layout="split"] .action-heal,
 body[data-control-layout="floating"] .action-heal{left:45px;top:0}
-body[data-control-layout="split"] .action-attack,
 body[data-control-layout="floating"] .action-attack{right:0;top:51px}
-body[data-control-layout="split"] .action-bag,
 body[data-control-layout="floating"] .action-bag{right:62px;bottom:0}
 /* Floating: spawn the stick exactly where the player touches the lower-left zone. */
 body[data-control-layout="floating"] .floatingTouchZone{display:block}
@@ -212,6 +212,7 @@ body.editing-controls .mobileActions:active{cursor:grabbing}
 .editControlsBanner .primary{flex-shrink:0;padding:10px 12px;font-size:12px}
 .controlEditActions{display:flex;flex-direction:column;gap:6px}
 .controlEditActions .secondary{padding:8px 12px;font-size:11px;white-space:nowrap}
+.settingNote{margin-top:8px;padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.055);border:1px solid rgba(196,239,225,.16);color:#d7ece5;font-size:11px;line-height:1.45}
 @media (max-width:900px),(pointer:coarse){.mobileControls{display:block}}
 @media (max-width:900px){
  #nearPrompt{bottom:calc(225px + env(safe-area-inset-bottom))}
@@ -225,15 +226,16 @@ body.editing-controls .mobileActions:active{cursor:grabbing}
  body[data-control-layout="center"] .action-heal{left:68px;top:22px}
  body[data-control-layout="center"] .action-attack{right:68px;top:22px;width:60px;height:60px}
  body[data-control-layout="split"] .mobileJoystick{width:112px;height:112px;left:calc(7px + env(safe-area-inset-left))}
- body[data-control-layout="split"] .mobileActions,
+ body[data-control-layout="split"] .mobileActions{width:150px;height:150px;right:calc(6px + env(safe-area-inset-right))}
  body[data-control-layout="floating"] .mobileActions{width:148px;height:142px;right:calc(6px + env(safe-area-inset-right))}
  body[data-control-layout="split"] .mobileActionBtn,
  body[data-control-layout="floating"] .mobileActionBtn{width:54px;height:54px;font-size:22px}
- body[data-control-layout="split"] .action-attack,
+ body[data-control-layout="split"] .action-interact{left:0;top:48px}
+ body[data-control-layout="split"] .action-heal{left:48px;top:0}
+ body[data-control-layout="split"] .action-attack{width:59px;height:59px;right:0;top:45px}
+ body[data-control-layout="split"] .action-bag{left:48px;bottom:0}
  body[data-control-layout="floating"] .action-attack{width:59px;height:59px;top:47px}
- body[data-control-layout="split"] .action-heal,
  body[data-control-layout="floating"] .action-heal{left:38px}
- body[data-control-layout="split"] .action-bag,
  body[data-control-layout="floating"] .action-bag{right:55px}
  .floatingTouchZone{width:min(56vw,calc(100vw - 154px))}
 }

@@ -24,7 +24,8 @@ function readGraphics() {
     fps:[0,30,45,60].includes(Number(previous.fps))?Number(previous.fps):base.fps,
     decorations:['low','medium','high'].includes(previous.decorations)?previous.decorations:base.decorations,
     reducedEffects:typeof previous.reducedEffects==='boolean'?previous.reducedEffects:base.reducedEffects,
-    showFps:previous.showFps===true
+    showFps:previous.showFps===true,
+    autoAttack:previous.autoAttack===true
   };
 }
 let graphics=readGraphics();
@@ -166,10 +167,69 @@ const enemies=[{x:6.6,z:8},{x:-9.8,z:3},{x:14.6,z:5},{x:-10.7,z:-13}].map((p,ind
 });
 const effects=[];
 function pulse(x,z,color=0xffe0a0){const mesh=new THREE.Mesh(new THREE.RingGeometry(.3,.4,32),new THREE.MeshBasicMaterial({color,transparent:true,opacity:.85,side:THREE.DoubleSide,depthWrite:false}));mesh.rotation.x=-Math.PI/2;mesh.position.set(x,.13,z);scene.add(mesh);effects.push({mesh,life:.56,age:0});}
+// A single radial spell covers the same area for manual and automatic attacks.
+// Reuse geometry and dispose only per-cast materials: no growing GPU buffer usage.
+const MAGIC_RADIUS=2.35;
+const MAGIC_DURATION=.42;
+const magicCylGeometry=new THREE.CylinderGeometry(1,1,1,48,1,true);
+const magicRimGeometry=new THREE.TorusGeometry(1,.033,6,48);
+const magicWaves=[];
+function castMagicWave(mode){
+ const group=new THREE.Group();group.position.set(state.x,0,state.z);
+ const side=new THREE.Mesh(magicCylGeometry,new THREE.MeshBasicMaterial({color:0x69edd9,transparent:true,opacity:.38,side:THREE.DoubleSide,depthWrite:false,blending:THREE.AdditiveBlending}));
+ side.position.y=.87;side.scale.y=1.42;group.add(side);
+ const rings=[];
+ for(const y of [.16,1.58]){
+  const ring=new THREE.Mesh(magicRimGeometry,new THREE.MeshBasicMaterial({color:y>.8?0xc1ffff:0x53efc7,transparent:true,opacity:.82,depthWrite:false,blending:THREE.AdditiveBlending}));
+  ring.rotation.x=Math.PI/2;ring.position.y=y;group.add(ring);rings.push(ring);
+ }
+ group.scale.set(.16,1,.16);scene.add(group);
+ magicWaves.push({group,side,rings,x:state.x,z:state.z,mode,hit:new Set(),age:0,life:MAGIC_DURATION});
+}
+function applyMagicHit(enemy,wave,distance){
+ wave.hit.add(enemy);
+ // At very close range the automatic spell is stronger; the edge keeps normal damage.
+ const damage=wave.mode==='auto'&&distance<=1.25?2:1;
+ enemy.hp-=damage;
+ enemy.body.material.emissive.setHex(0xbb8899);
+ if(enemy.hp<=0){
+  enemy.alive=false;enemy.group.visible=false;enemy.shadow.visible=false;
+  state.coins+=5;state.kills++;pulse(enemy.x,enemy.z,0xe7b8ff);
+  toast('⚔️ Дух переможений! +5 монет');refreshHUD();persist();
+ }
+}
+function updateMagicWaves(dt){
+ for(let i=magicWaves.length-1;i>=0;i--){
+  const wave=magicWaves[i];wave.age+=dt;
+  const t=Math.min(1,wave.age/wave.life),smooth=1-(1-t)*(1-t);
+  const radius=.16+(MAGIC_RADIUS-.16)*smooth;
+  wave.group.scale.set(radius,1,radius);
+  wave.side.material.opacity=.38*(1-t);
+  for(const ring of wave.rings)ring.material.opacity=.82*(1-t);
+  for(const enemy of enemies){
+   if(!enemy.alive||wave.hit.has(enemy))continue;
+   const distance=Math.hypot(enemy.x-wave.x,enemy.z-wave.z);
+   if(distance<=radius&&distance<=MAGIC_RADIUS)applyMagicHit(enemy,wave,distance);
+  }
+  if(t>=1){
+   scene.remove(wave.group);
+   wave.group.children.forEach(part=>part.material.dispose());
+   magicWaves.splice(i,1);
+  }
+ }
+}
 function collect(i){if(state.collected[i]||state.stage===0)return;state.collected[i]=true;collectibles[i].group.visible=false;collectibles[i].label.visible=false;pulse(crystalsAt[i].x,crystalsAt[i].z,0xeaffd2);toast('💎 Знайдено: '+crystalsAt[i].name+'!');if(countGems()===3){state.stage=2;toast('✨ Усі кристали зібрано! Прямуй до вівтаря на півдні.')}refreshHUD();persist()}
 function heal(){if(!state.started||state.paused||state.inDialogue||state.bagOpen||settingsOpen)return;if(state.potions<=0){toast('🧪 Зілля закінчилися');return}if(state.hp>=100){toast('❤️ Здоров’я вже повне');return}state.potions--;state.hp=Math.min(100,state.hp+40);pulse(state.x,state.z,0x83eec2);toast('❤️ Відновлено 40 здоров’я');refreshHUD();persist()}
-function attack(){if(!state.started||state.paused||state.inDialogue||state.bagOpen||settingsOpen||state.attackCD>0)return;state.attackCD=.48;pulse(state.x,state.z,0xfbd69e);let hit=0;for(const e of enemies){if(!e.alive||Math.hypot(e.x-state.x,e.z-state.z)>2.35)continue;e.hp--;hit++;e.body.material.emissive=new THREE.Color(0xbb8899);if(e.hp<=0){e.alive=false;e.group.visible=false;e.shadow.visible=false;state.coins+=5;state.kills++;pulse(e.x,e.z,0xe7b8ff);toast('⚔️ Дух переможений! +5 монет');refreshHUD();persist()}}
- if(!hit)toast('⚔️ Замах! Духи надто далеко.')}
+function attack(mode='manual'){
+ if(!state.started||state.paused||state.inDialogue||state.bagOpen||settingsOpen||state.attackCD>0)return;
+ const automatic=mode==='auto';
+ // Autoattack only fires when there is a living enemy inside the magic radius.
+ const targetInRange=enemies.some(e=>e.alive&&Math.hypot(e.x-state.x,e.z-state.z)<=MAGIC_RADIUS);
+ if(automatic&&!targetInRange)return;
+ state.attackCD=automatic?.64:.48;
+ castMagicWave(automatic?'auto':'manual');
+ if(!targetInRange&&!automatic)toast('✨ Магічна хвиля! Поблизу немає духів.');
+}
 function dialogue(name,face,lines,onClose){state.inDialogue=true;$('dialogueSpeaker').textContent=name;$('dialogueFace').textContent=face;const el=$('dialogue');el.classList.remove('hidden');let i=0;
  const draw=()=>{$('dialogueLine').textContent=lines[i];$('nextDialogue').textContent=i===lines.length-1?'Зрозуміло ✓':'Далі ›'};draw();
  $('nextDialogue').onclick=()=>{if(i<lines.length-1){i++;draw()}else{el.classList.add('hidden');state.inDialogue=false;onClose?.()}};
@@ -191,7 +251,7 @@ function closeBag(){$('inventoryOverlay').classList.add('hidden');state.bagOpen=
 function setPause(force){if(!state.started||state.inDialogue||state.bagOpen||settingsOpen)return;state.paused=typeof force==='boolean'?force:!state.paused;$('pauseOverlay').classList.toggle('hidden',!state.paused);persist()}
 // Graphics settings can be changed live; gameplay progress is stored separately.
 let settingsOpen=false;
-const controls={preset:$('qualityPreset'),scale:$('renderScale'),shadows:$('shadowQuality'),fps:$('frameLimit'),decorations:$('decorationQuality'),effects:$('reduceEffects'),meter:$('showFps')};
+const controls={preset:$('qualityPreset'),scale:$('renderScale'),shadows:$('shadowQuality'),fps:$('frameLimit'),decorations:$('decorationQuality'),effects:$('reduceEffects'),meter:$('showFps'),autoAttack:$('autoAttack')};
 function applyGraphics(){
  renderer.shadowMap.enabled=graphics.shadows!=='off';
  if(graphics.shadows!=='off'){
@@ -217,6 +277,7 @@ function syncSettings(){
  controls.decorations.value=graphics.decorations;
  controls.effects.checked=graphics.reducedEffects;
  controls.meter.checked=graphics.showFps;
+ controls.autoAttack.checked=graphics.autoAttack;
 }
 function setGraphics(next){graphics={...graphics,...next};storeGraphics();syncSettings();applyGraphics()}
 controls.preset.addEventListener('change',()=>{
@@ -230,6 +291,7 @@ controls.fps.addEventListener('change',()=>setGraphics({preset:'custom',fps:Numb
 controls.decorations.addEventListener('change',()=>setGraphics({preset:'custom',decorations:controls.decorations.value}));
 controls.effects.addEventListener('change',()=>setGraphics({preset:'custom',reducedEffects:controls.effects.checked}));
 controls.meter.addEventListener('change',()=>setGraphics({showFps:controls.meter.checked}));
+controls.autoAttack.addEventListener('change',()=>setGraphics({autoAttack:controls.autoAttack.checked}));
 function openSettings(){
  if(settingsOpen||state.inDialogue)return;
  settingsOpen=true;
@@ -275,7 +337,7 @@ $('pauseBtn').onclick=()=>setPause();$('resumeBtn').onclick=()=>setPause(false);
 $('winContinue').onclick=()=>{$('winOverlay').classList.add('hidden');state.paused=false};
 // Mobile controls v1.4: live layouts, analog joystick and independent multitouch actions.
 const CONTROL_STORAGE='emilys-adventures-controls-v1';
-const GAME_VERSION='1.4.1';
+const GAME_VERSION='1.5.1';
 document.documentElement.dataset.gameVersion=GAME_VERSION;
 const CONTROL_MODES=['auto','center','split','floating'];
 let controlPrefs={mode:'auto',dock:null};
@@ -344,6 +406,29 @@ $('controlLayout').addEventListener('input',onControlLayoutChange);
 // Rotating a phone changes auto mode immediately. Explicit choices remain unchanged.
 window.addEventListener('resize',applyControlLayout);
 window.visualViewport?.addEventListener('resize',applyControlLayout);
+const gamepadButtons=new Map();
+function readGamepad(){
+ const pads=navigator.getGamepads?.()||[];
+ const gp=[...pads].find(p=>p&&p.connected&&p.mapping==='standard')||[...pads].find(p=>p&&p.connected)||null;
+ const result={active:!!gp,x:0,y:0,analog:false};
+ if(!gp){gamepadButtons.clear();return result}
+ let x=gp.axes?.[0]||0,y=gp.axes?.[1]||0;
+ if(Math.abs(x)<.16)x=0; if(Math.abs(y)<.16)y=0;
+ if(x||y){result.x=x;result.y=y;result.analog=true}
+ else{
+  result.x=(gp.buttons?.[15]?.pressed?1:0)-(gp.buttons?.[14]?.pressed?1:0);
+  result.y=(gp.buttons?.[13]?.pressed?1:0)-(gp.buttons?.[12]?.pressed?1:0);
+ }
+ const bindings=[[0,interact],[2,attack],[1,heal],[3,()=>{if(state.bagOpen)closeBag();else bag()}],[8,()=>{if(state.bagOpen)closeBag();else bag()}],[9,()=>setPause()]];
+ for(const [index,action] of bindings){
+  const down=!!gp.buttons?.[index]?.pressed, prev=gamepadButtons.get(index)===true;
+  if(down&&!prev)action();
+  gamepadButtons.set(index,down);
+ }
+ return result;
+}
+window.addEventListener('gamepadconnected',()=>toast('🎮 Геймпад підключено'));
+window.addEventListener('gamepaddisconnected',()=>{gamepadButtons.clear();toast('🎮 Геймпад відключено')});
 function setJoystickFromPointer(e){
  const rect=joystickEl.getBoundingClientRect(),cx=rect.left+rect.width/2,cy=rect.top+rect.height/2;
  joystick.maxRadius=Math.max(26,(rect.width-joystickKnob.offsetWidth)/2-5);
@@ -409,23 +494,24 @@ window.addEventListener('keydown',e=>{
  else if(e.code==='KeyI'){if(state.bagOpen)closeBag();else bag()}
 });
 window.addEventListener('keyup',e=>pressed.delete(e.code));
-window.addEventListener('blur',()=>{pressed.clear();endJoystick();last=performance.now()});
+window.addEventListener('blur',()=>{pressed.clear();gamepadButtons.clear();endJoystick();last=performance.now()});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)endJoystick();else last=performance.now()});
 applyControlLayout();
-// Tapping the landscape establishes a walk destination (useful on phones).
-const raycaster=new THREE.Raycaster(),ndc=new THREE.Vector2(),plane=new THREE.Plane(new THREE.Vector3(0,1,0),0);let walkTo=null;
-canvas.addEventListener('pointerdown',e=>{if(!state.started||state.paused||state.inDialogue||state.bagOpen||settingsOpen)return;collapsePanels();const r=canvas.getBoundingClientRect();ndc.x=((e.clientX-r.left)/r.width)*2-1;ndc.y=-((e.clientY-r.top)/r.height)*2+1;raycaster.setFromCamera(ndc,camera);const point=new THREE.Vector3();if(raycaster.ray.intersectPlane(plane,point)){walkTo={x:THREE.MathUtils.clamp(point.x,-SCENE_RADIUS,SCENE_RADIUS),z:THREE.MathUtils.clamp(point.z,-SCENE_RADIUS,SCENE_RADIUS)}}});
+// v1.5: tap-to-move removed completely to avoid accidental walks on touch devices.
+let walkTo=null;
 let last=performance.now(),time=0,miniClock=0,saveClock=0,fpsClock=performance.now(),fpsFrames=0;const tmpCam=new THREE.Vector3();
 function canStand(x,z){if(Math.abs(x)>SCENE_RADIUS||Math.abs(z)>SCENE_RADIUS)return false;return solids.every(o=>Math.hypot(o.x-x,o.z-z)>o.r+.26)}
 function move(dx,dz){const nx=state.x+dx,nz=state.z+dz;if(canStand(nx,nz)){state.x=nx;state.z=nz;return}if(canStand(nx,state.z))state.x=nx;else if(canStand(state.x,nz))state.z=nz}
-function update(dt){if(!state.started||state.paused||state.inDialogue||state.bagOpen||settingsOpen)return;
+function update(dt){const gamepad=readGamepad();if(!state.started||state.paused||state.inDialogue||state.bagOpen||settingsOpen)return;
  state.attackCD=Math.max(0,state.attackCD-dt);state.hitCD=Math.max(0,state.hitCD-dt);
  let sx=(pressed.has('KeyD')||pressed.has('ArrowRight')?1:0)-(pressed.has('KeyA')||pressed.has('ArrowLeft')?1:0),sy=(pressed.has('KeyS')||pressed.has('ArrowDown')?1:0)-(pressed.has('KeyW')||pressed.has('ArrowUp')?1:0);
  if(!sx&&!sy&&Math.hypot(joystick.x,joystick.y)>.16){sx=joystick.x;sy=joystick.y}
+ if(!sx&&!sy&&Math.hypot(gamepad.x,gamepad.y)>.16){sx=gamepad.x;sy=gamepad.y}
  if(sx||sy)walkTo=null;
  if(!sx&&!sy&&walkTo){const dx=walkTo.x-state.x,dz=walkTo.z-state.z,dist=Math.hypot(dx,dz);if(dist<.27)walkTo=null;else{sx=(dx-dz)/Math.SQRT2;sy=(dx+dz)/Math.SQRT2}}
+ if(graphics.autoAttack&&state.attackCD<=0)attack('auto');
  let moving=false;
- if(sx||sy){const len=Math.hypot(sx,sy),analog=joystick.active&&!pressed.size&&!walkTo;const speed=analog?clampValue((len-.16)/.84,.20,1):1;sx/=len;sy/=len;const wx=(sx+sy)/Math.SQRT2,wz=(sy-sx)/Math.SQRT2;const oldX=state.x,oldZ=state.z;move(wx*3.75*speed*dt,wz*3.75*speed*dt);moving=Math.hypot(state.x-oldX,state.z-oldZ)>.0005;
+ if(sx||sy){const len=Math.hypot(sx,sy),analog=(joystick.active&&!pressed.size&&!walkTo)||(gamepad.active&&gamepad.analog&&!pressed.size&&!walkTo&&!joystick.active);const speed=analog?clampValue((len-.16)/.84,.20,1):1;sx/=len;sy/=len;const wx=(sx+sy)/Math.SQRT2,wz=(sy-sx)/Math.SQRT2;const oldX=state.x,oldZ=state.z;move(wx*3.75*speed*dt,wz*3.75*speed*dt);moving=Math.hypot(state.x-oldX,state.z-oldZ)>.0005;
   if(Math.abs(sx)>.25||Math.abs(sy)>.25)facing=Math.abs(sx)>Math.abs(sy)?(sx>0?'right':'left'):(sy>0?'down':'up');
  }
  if(moving){walkClock+=dt;frame=Math.floor(walkClock*7.6)%4}else{walkClock=0;frame=0}setHeroFrame(facing,frame);
@@ -459,6 +545,7 @@ function tick(now){
  update(dt);hero.position.set(state.x,1.02+Math.sin(time*2)*(state.started?.025:.035),state.z);heroShadow.position.set(state.x,-.007,state.z);
  sage.rotation.y=Math.sin(time*.6)*.09;altarCrystal.rotation.y+=dt*.38;altarCrystal.position.y=1.42+Math.sin(time*1.8)*.14;
  for(let i=effects.length-1;i>=0;i--){const e=effects[i];e.age+=dt;const k=e.age/e.life;e.mesh.scale.setScalar(1+k*3.4);e.mesh.material.opacity=Math.max(0,(1-k)*.8);if(k>=1){scene.remove(e.mesh);e.mesh.geometry.dispose();e.mesh.material.dispose();effects.splice(i,1)}}
+ updateMagicWaves(dt);
  cameraFollow.lerp(tmpCam.set(state.x,0,state.z),1-Math.exp(-dt*4));camera.position.set(cameraFollow.x+13.7,19,cameraFollow.z+13.7);camera.lookAt(cameraFollow.x,.0,cameraFollow.z);
  renderer.render(scene,camera);miniClock+=dt;if(miniClock>.11){miniClock=0;updateMinimap()}
 }
